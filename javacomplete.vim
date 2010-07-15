@@ -1686,11 +1686,6 @@ endfu
 
                 " classpath								{{{2
                 fu! javacomplete#AddClassPath(s)
-                    if !isdirectory(a:s)
-                        echoerr 'invalid classpath: ' . a:s
-                        return
-                    endif
-
                     if !exists('s:classpath')
                         let s:classpath = [a:s]
                     elseif index(s:classpath, a:s) == -1
