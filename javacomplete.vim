@@ -106,7 +106,7 @@ let s:files = {}	" srouce file path -> properties, e.g. {filekey: {'unit': compi
 let s:history = {}	" 
 
 
-" This function is used for the 'omnifunc' option.		{{{1
+" FindStart function for completion {{{1
 function! s:FindStart()
     let s:et_whole = reltime()
     let start = col('.') - 1
@@ -218,6 +218,7 @@ function! s:FindStart()
     return -1
 endf
 
+" This function is used for the 'omnifunc' option. {{{1
 function! javacomplete#Complete(findstart, base)
     if a:findstart
         return s:FindStart()
@@ -756,6 +757,7 @@ endfu
                 let result = filter(result, "type(v:val) == type('') ? v:val ==# '" . mi.method . "' : v:val['word'] ==# '" . mi.method . "('")
             endif
             return result
+
         endif
     endfu
 
@@ -1401,7 +1403,6 @@ endfu
                 call java_parser#InitParser(lines)
                 call java_parser#SetLogLevel(5)
                 let props.unit = java_parser#compilationUnit()
-
                 let package = has_key(props.unit, 'package') ? props.unit.package . '.' : ''
                 call s:UpdateFQN(props.unit, package)
             endif
@@ -2913,5 +2914,5 @@ endfu
                         return list
                     endfu
                     " }}}
-                    "}}}
-                    " vim:set fdm=marker sw=4 ts=4 si expandtab nowrap:
+"}}}
+" vim:set fdm=marker sw=4 ts=4 si foldcolumn:1 expandtab nowrap:
