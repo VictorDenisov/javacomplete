@@ -102,7 +102,7 @@ let b:errormsg = ''
 
 " script variables						{{{1
 let s:cache = {}	" FQN -> member list, e.g. {'java.lang.StringBuffer': classinfo, 'java.util': packageinfo, '/dir/TopLevelClass.java': compilationUnit}
-let s:files = {}	" srouce file path -> properties, e.g. {filekey: {'unit': compilationUnit, 'changedtick': tick, }}
+let s:files = {}	" source file path -> properties, e.g. {filekey: {'unit': compilationUnit, 'changedtick': tick, }}
 let s:history = {}	" 
 
 
@@ -1062,9 +1062,6 @@ fu! s:SearchStaticImports(name, fullmatch)
             let members = s:SearchMember(ti, a:name, a:fullmatch, 12, 1, 0)
             let result[1] += members[1]
             let result[2] += members[2]
-            "let pattern = 'item.n ' . (a:fullmatch ? '==# ''' : '=~# ''^') . a:name . ''' && s:IsStatic(item.m)'
-            "let result[1] += s:filter(get(ti, 'methods', []), pattern)
-            "let result[2]  += s:filter(get(ti, 'fields', []),  pattern)
         else
             " TODO: mark the wrong import declaration.
         endif
@@ -1375,56 +1372,56 @@ function! s:GetDeclaredClassName(var)
     return ''
 endfunction
 
-        " using java_parser.vim					{{{1
-        " javacomplete#parse()					{{{2
-        fu! javacomplete#parse(...)
-            let filename = a:0 == 0 ? '%' : a:1
+" using java_parser.vim					{{{1
+" javacomplete#parse()					{{{2
+fu! javacomplete#parse(...)
+    let filename = a:0 == 0 ? '%' : a:1
 
-            let changed = 0
-            if filename == '%'
-                let filename = s:GetCurrentFileKey()
-                let props = get(s:files, filename, {})
-                if get(props, 'changedtick', -1) != b:changedtick
-                    let changed = 1
-                    let props.changedtick = b:changedtick
-                    let lines = getline('^', '$')
-                endif
-            else
-                let props = get(s:files, filename, {})
-                if get(props, 'modifiedtime', 0) != getftime(filename)
-                    let changed = 1
-                    let props.modifiedtime = getftime(filename)
-                    let lines = readfile(filename)
-                endif
-            endif
+    let changed = 0
+    if filename == '%'
+        let filename = s:GetCurrentFileKey()
+        let props = get(s:files, filename, {})
+        if get(props, 'changedtick', -1) != b:changedtick
+            let changed = 1
+            let props.changedtick = b:changedtick
+            let lines = getline('^', '$')
+        endif
+    else
+        let props = get(s:files, filename, {})
+        if get(props, 'modifiedtime', 0) != getftime(filename)
+            let changed = 1
+            let props.modifiedtime = getftime(filename)
+            let lines = readfile(filename)
+        endif
+    endif
 
-            if changed
-                call java_parser#InitParser(lines)
-                call java_parser#SetLogLevel(5)
-                let props.unit = java_parser#compilationUnit()
-                let package = has_key(props.unit, 'package') ? props.unit.package . '.' : ''
-                call s:UpdateFQN(props.unit, package)
-            endif
-            let s:files[filename] = props
-            return props.unit
-        endfu
+    if changed
+        call java_parser#InitParser(lines)
+        call java_parser#SetLogLevel(5)
+        let props.unit = java_parser#compilationUnit()
+        let package = has_key(props.unit, 'package') ? props.unit.package . '.' : ''
+        call s:UpdateFQN(props.unit, package)
+    endif
+    let s:files[filename] = props
+    return props.unit
+endfu
 
-        " update fqn for toplevel types or nested types. 
-        " not for local type or anonymous type
-        fu! s:UpdateFQN(tree, qn)
-            if a:tree.tag == 'TOPLEVEL'
-                for def in a:tree.types
-                    call s:UpdateFQN(def, a:qn)
-                endfor
-            elseif a:tree.tag == 'CLASSDEF'
-                let a:tree.fqn = a:qn . a:tree.name
-                for def in a:tree.defs
-                    if def.tag == 'CLASSDEF'
-                        call s:UpdateFQN(def, a:tree.fqn . '.')
-                    endif
-                endfor
+" update fqn for toplevel types or nested types. 
+" not for local type or anonymous type
+fu! s:UpdateFQN(tree, qn)
+    if a:tree.tag == 'TOPLEVEL'
+        for def in a:tree.types
+            call s:UpdateFQN(def, a:qn)
+        endfor
+    elseif a:tree.tag == 'CLASSDEF'
+        let a:tree.fqn = a:qn . a:tree.name
+        for def in a:tree.defs
+            if def.tag == 'CLASSDEF'
+                call s:UpdateFQN(def, a:tree.fqn . '.')
             endif
-        endfu
+        endfor
+    endif
+endfu
 
         " TreeVisitor						{{{2
         fu! s:visitTree(tree, param) dict
@@ -2436,482 +2433,422 @@ fu! s:DoGetClassInfo(class, ...)
     return {}
 endfu
 
-                " Rules of overriding and hiding:
-                " 1. Fields cannot be overridden; they can only be hidden.
-                "    In the subclass, the hidden field of superclass can no longer be accessed
-                "    directly by its simple name. `super` or another reference must be used.
-                " 2. A method can be overriden only if it is accessible.
-                "    When overriding methods, both the signature and return type must be the
-                "    same as in the superclass.
-                " 3. Static members cannot be overridden; they can only be hidden
-                "    -- whether a field or a method. But hiding static members has little effect,
-                "    because static should be accessed via the name of its declaring class.
-                " Given optional argument, add protected, default (package) access, private members.
-                "fu! s:MergeClassInfo(ci, another, ...)
-                "  if empty(a:another)	| return a:ci		| endif
-                "
-                "  if empty(a:ci)
-                "    let ci = copy(a:another)
-                ""    if a:0 > 0 && a:1
-                ""      call extend(ci.fields, get(a:another, 'declared_fields', []))
-                ""      call extend(ci.methods, get(a:another, 'declared_methods', []))
-                ""    endif
-                "    return ci
-                "  endif
-                "
-                "  call extend(a:ci.methods, a:another.methods)
-                "
-                "  for f in a:another.fields
-                "    if s:Index(a:ci.fields, f.n, 'n') < 0
-                "      call add(a:ci.fields, f)
-                "    endif
-                "  endfor
-                "  return a:ci
-                "endfu
+" Parameters:
+"   class	the qualified class name
+" Return:	TClassInfo or {} when not found
+" See ClassInfoFactory.getClassInfo() in insenvim.
+function! s:DoGetReflectionClassInfo(fqn)
+    if !has_key(s:cache, a:fqn)
+        let res = s:RunReflection('-C', a:fqn, 's:DoGetReflectionClassInfo')
+        if res =~ '^{'
+            let s:cache[a:fqn] = s:Sort(eval(res))
+        elseif res =~ '^['
+            for type in eval(res)
+                if get(type, 'name', '') != ''
+                    let s:cache[type.name] = s:Sort(type)
+                endif
+            endfor
+        else
+            let b:errormsg = res
+        endif
+    endif
+    return get(s:cache, a:fqn, {})
+endfunction
+
+fu! s:GetClassInfoFromSource(class, filename)
+    let ci = {}
+    if len(tagfiles()) > 0
+        let ci = s:DoGetClassInfoFromTags(a:class)
+    endif
+
+    if empty(ci)
+        call s:Info('Use java_parser.vim to generate class information')
+        let unit = javacomplete#parse(a:filename)
+        let targetPos = a:filename == '%' ? java_parser#MakePos(line('.')-1, col('.')-1) : -1
+        for t in s:SearchTypeAt(unit, targetPos, 1)
+            if t.name == a:class
+                let t.filepath = a:filename == '%' ? s:GetCurrentFileKey() : expand(a:filename)
+                return s:Tree2ClassInfo(t)
+            endif
+        endfor
+    endif
+    return ci
+endfu
+
+fu! s:Tree2ClassInfo(t)
+    let t = a:t
+
+    " fill fields and methods
+    let t.fields = []
+    let t.methods = []
+    let t.ctors = []
+    let t.classes = []
+    for def in t.defs
+        if def.tag == 'METHODDEF'
+            call add(def.n == t.name ? t.ctors : t.methods, def)
+        elseif def.tag == 'VARDEF'
+            call add(t.fields, def)
+        elseif def.tag == 'CLASSDEF'
+            call add(t.classes, t.fqn . '.' . def.name)
+        endif
+    endfor
+
+    " convert type name in extends to fqn for class defined in source files
+    if !has_key(a:t, 'classpath') && has_key(a:t, 'extends')
+        if has_key(a:t, 'filepath') && a:t.filepath != s:GetCurrentFileKey()
+            let filepath = a:t.filepath
+            let packagename = get(s:files[filepath].unit, 'package', '')
+        else
+            let filepath = expand('%:p')
+            let packagename = s:GetPackageName()
+        endif
+
+        let extends = a:t.extends
+        let i = 0
+        while i < len(extends)
+            let ci = s:DoGetClassInfo(java_parser#type2Str(extends[i]), filepath, packagename)
+            if has_key(ci, 'fqn')
+                let extends[i] = ci.fqn
+            endif
+            let i += 1
+        endwhile
+    endif
+
+    return t
+endfu
+
+" To obtain information of the class in current file or current folder, or
+" even in current project.
+function! s:DoGetClassInfoFromTags(class)
+    " find tag of a:class declaration
+    let tags = taglist('^' . a:class)
+    let filename = ''
+    let cmd = ''
+    for tag in tags
+        if has_key(tag, 'kind')
+            if tag['kind'] == 'c'
+                let filename = tag['filename']
+                let cmd = tag['cmd']
+                break
+            endif
+        endif
+    endfor
+
+    let tags = taglist('^' . (empty(b:incomplete) ? '.*' : b:incomplete) )
+    if filename != ''
+        call filter(tags, "v:val['filename'] == '" . filename . "' && has_key(v:val, 'class') ? v:val['class'] == '" . a:class . "' : 1")
+    endif
+
+    let ci = {'name': a:class}
+    " extends and implements
+    let ci['ctors'] = []
+    let ci['fields'] = []
+    let ci['methods'] = []
+
+    " members
+    for tag in tags
+        let member = {'n': tag['name']}
+
+        " determine kind
+        let kind = 'm'
+        if has_key(tag, 'kind')
+            let kind = tag['kind']
+        endif
+
+        let cmd = tag['cmd']
+        if cmd =~ '\<static\>'
+            let member['m'] = '1000'
+        else
+            let member['m'] = ''
+        endif
+
+        let desc = substitute(cmd, '/^\s*', '', '')
+        let desc = substitute(desc, '\s*{\?\s*$/$', '', '')
+
+        if kind == 'm'
+            " description
+            if cmd =~ '\<static\>'
+                let desc = substitute(desc, '\s\+static\s\+', ' ', '')
+            endif
+            let member['d'] = desc
+
+            let member['p'] = ''
+            let member['r'] = ''
+            if tag['name'] == a:class
+                call add(ci['ctors'], member)
+            else
+                call add(ci['methods'], member)
+            endif
+        elseif kind == 'f'
+            let member['t'] = substitute(desc, '\([a-zA-Z0-9_[\]]\)\s\+\<' . tag['name'] . '\>.*$', '\1', '')
+            call add(ci['fields'], member)
+        endif
+    endfor
+    return ci
+endfu
+
+" package information							{{{2
+
+fu! s:DoGetInfoByReflection(class, option)
+    if has_key(s:cache, a:class)
+        return s:cache[a:class]
+    endif
+
+    let res = s:RunReflection(a:option, a:class, 's:DoGetInfoByReflection')
+    if res =~ '^[{\[]'
+        let v = eval(res)
+        if type(v) == type([])
+            let s:cache[a:class] = sort(v)
+        elseif type(v) == type({})
+            if get(v, 'tag', '') =~# '^\(PACKAGE\|CLASSDEF\)$'
+                let s:cache[a:class] = v
+            else
+                call extend(s:cache, v, 'force')
+            endif
+        endif
+        unlet v
+    else
+        let b:errormsg = res
+    endif
+
+    return get(s:cache, a:class, {})
+endfu
+
+" search in members							{{{2
+" TODO: what about default access?
+" public for all              
+" protected for this or super 
+" private for this            
+fu! s:CanAccess(mods, kind)
+    return (a:mods[-4:-4] || a:kind/10 == 0)
+                \ &&   (a:kind == 1 || a:mods[-1:]
+                \	|| (a:mods[-3:-3] && (a:kind == 1 || a:kind == 2))
+                \	|| (a:mods[-2:-2] && a:kind == 1))
+endfu
+
+fu! s:SearchMember(ci, name, fullmatch, kind, returnAll, memberkind, ...)
+    let result = [[], [], []]
+
+    if a:kind != 13
+        for m in (a:0 > 0 && a:1 ? [] : get(a:ci, 'fields', [])) + ((a:kind == 1 || a:kind == 2) ? get(a:ci, 'declared_fields', []) : [])
+            if empty(a:name) || (a:fullmatch ? m.n ==# a:name : m.n =~# '^' . a:name)
+                if s:CanAccess(m.m, a:kind)
+                    call add(result[2], m)
+                endif
+            endif
+        endfor
+
+        for m in (a:0 > 0 && a:1 ? [] : get(a:ci, 'methods', [])) + ((a:kind == 1 || a:kind == 2) ? get(a:ci, 'declared_methods', []) : [])
+            if empty(a:name) || (a:fullmatch ? m.n ==# a:name : m.n =~# '^' . a:name)
+                if s:CanAccess(m.m, a:kind)
+                    call add(result[1], m)
+                endif
+            endif
+        endfor
+    endif
+
+    if a:kind/10 != 0
+        let types = get(a:ci, 'classes', [])
+        for t in types
+            if empty(a:name) || (a:fullmatch ? t[strridx(t, '.')+1:] ==# a:name : t[strridx(t, '.')+1:] =~# '^' . a:name)
+                if !has_key(s:cache, t) || !has_key(s:cache[t], 'flags') || a:kind == 1 || s:cache[t].flags[-1:]
+                    call add(result[0], t)
+                endif
+            endif
+        endfor
+    endif
+
+    " key `classpath` indicates it is a loaded class from classpath
+    " All public members of a loaded class are stored in current ci
+    if !has_key(a:ci, 'classpath') || (a:kind == 1 || a:kind == 2)
+        for i in get(a:ci, 'extends', [])
+            let ci = s:DoGetClassInfo(java_parser#type2Str(i))
+            let members = s:SearchMember(ci, a:name, a:fullmatch, a:kind == 1 ? 2 : a:kind, a:returnAll, a:memberkind)
+            let result[0] += members[0]
+            let result[1] += members[1]
+            let result[2] += members[2]
+        endfor
+    endif
+    return result
+endfu
 
 
-                " Parameters:
-                "   class	the qualified class name
-                " Return:	TClassInfo or {} when not found
-                " See ClassInfoFactory.getClassInfo() in insenvim.
-                function! s:DoGetReflectionClassInfo(fqn)
-                    if !has_key(s:cache, a:fqn)
-                        let res = s:RunReflection('-C', a:fqn, 's:DoGetReflectionClassInfo')
-                        if res =~ '^{'
-                            let s:cache[a:fqn] = s:Sort(eval(res))
-                        elseif res =~ '^['
-                            for type in eval(res)
-                                if get(type, 'name', '') != ''
-                                    let s:cache[type.name] = s:Sort(type)
-                                endif
-                            endfor
-                        else
-                            let b:errormsg = res
-                        endif
-                    endif
-                    return get(s:cache, a:fqn, {})
-                endfunction
+" generate member list							{{{2
 
-                fu! s:GetClassInfoFromSource(class, filename)
-                    let ci = {}
-                    if len(tagfiles()) > 0
-                        let ci = s:DoGetClassInfoFromTags(a:class)
-                    endif
+fu! s:DoGetFieldList(fields)
+    let s = ''
+    for field in a:fields
+        let s .= "{'kind':'" . (s:IsStatic(field.m) ? "F" : "f") . "','word':'" . field.n . "','menu':'" . field.t . "','dup':1},"
+    endfor
+    return s
+endfu
 
-                    if empty(ci)
-                        call s:Info('Use java_parser.vim to generate class information')
-                        let unit = javacomplete#parse(a:filename)
-                        let targetPos = a:filename == '%' ? java_parser#MakePos(line('.')-1, col('.')-1) : -1
-                        for t in s:SearchTypeAt(unit, targetPos, 1)
-                            if t.name == a:class
-                                let t.filepath = a:filename == '%' ? s:GetCurrentFileKey() : expand(a:filename)
-                                return s:Tree2ClassInfo(t)
-                                "return s:AddInheritedClassInfo(s:Tree2ClassInfo(t), t)
-                            endif
-                        endfor
-                    endif
-                    return ci
-                endfu
+fu! s:DoGetMethodList(methods, ...)
+    let paren = a:0 == 0 || !a:1 ? '(' : ''
+    let s = ''
+    for method in a:methods
+        let s .= "{'kind':'" . (s:IsStatic(method.m) ? "M" : "m") . "','word':'" . method.n . paren . "','abbr':'" . method.n . "()','menu':'" . method.d . "','dup':'1'},"
+    endfor
+    return s
+endfu
 
-                fu! s:Tree2ClassInfo(t)
-                    let t = a:t
+" kind:
+"	0 - for instance, 1 - this, 2 - super, 3 - class, 4 - array, 5 - method result, 6 - primitive type
+"	11 - for type, with `class` and static member and nested types.
+"	12 - for import static, no lparen for static methods
+"	13 - for import or extends or implements, only nested types
+"	20 - for package
+fu! s:DoGetMemberList(ci, kind)
+    if type(a:ci) != type({}) || a:ci == {}
+        return []
+    endif
 
-                    " fill fields and methods
-                    let t.fields = []
-                    let t.methods = []
-                    let t.ctors = []
-                    let t.classes = []
-                    for def in t.defs
-                        if def.tag == 'METHODDEF'
-                            call add(def.n == t.name ? t.ctors : t.methods, def)
-                        elseif def.tag == 'VARDEF'
-                            call add(t.fields, def)
-                        elseif def.tag == 'CLASSDEF'
-                            call add(t.classes, t.fqn . '.' . def.name)
-                        endif
+    let s = a:kind == 11 ? "{'kind': 'C', 'word': 'class', 'menu': 'Class'}," : ''
+
+    let members = s:SearchMember(a:ci, '', 1, a:kind, 1, 0, a:kind == 2)
+
+    " add accessible member types
+    if a:kind / 10 != 0
+        " Use dup here for member type can share name with field.
+        for class in members[0]
+            let v = get(s:cache, class, {})
+            if v == {} || v.flags[-1:]
+                let s .= "{'kind': 'C', 'word': '" . substitute(class, a:ci.name . '\.', '\1', '') . "','dup':1},"
+            endif
+        endfor
+    endif
+
+    if a:kind != 13
+        let fieldlist = []
+        let sfieldlist = []
+        for field in members[2]
+            if s:IsStatic(field['m'])
+                call add(sfieldlist, field)
+            elseif a:kind / 10 == 0
+                call add(fieldlist, field)
+            endif
+        endfor
+
+        let methodlist = []
+        let smethodlist = []
+        for method in members[1]
+            if s:IsStatic(method['m'])
+                call add(smethodlist, method)
+            elseif a:kind / 10 == 0
+                call add(methodlist, method)
+            endif
+        endfor
+
+        if a:kind / 10 == 0
+            let s .= s:DoGetFieldList(fieldlist)
+            let s .= s:DoGetMethodList(methodlist)
+        endif
+        let s .= s:DoGetFieldList(sfieldlist)
+        let s .= s:DoGetMethodList(smethodlist, a:kind == 12)
+
+        let s = substitute(s, '\<' . a:ci.name . '\.', '', 'g')
+        let s = substitute(s, '\<java\.lang\.', '', 'g')
+        let s = substitute(s, '\<\(public\|static\|synchronized\|transient\|volatile\|final\|strictfp\|serializable\|native\)\s\+', '', 'g')
+        endif
+        return eval('[' . s . ']')
+    endfu
+
+    " interface							{{{2
+
+    function! s:GetMemberList(class)
+        if s:IsBuiltinType(a:class)
+            return []
+        endif
+
+        return s:DoGetMemberList(s:DoGetClassInfo(a:class), 0)
+    endfunction
+
+    fu! s:GetStaticMemberList(class)
+        return s:DoGetMemberList(s:DoGetClassInfo(a:class), 11)
+    endfu
+
+    function! s:GetConstructorList(class)
+        let ci = s:DoGetClassInfo(a:class)
+        if empty(ci)
+            return []
+        endif
+
+        let s = ''
+        for ctor in get(ci, 'ctors', [])
+            let s .= "{'kind': '+', 'word':'". a:class . "(','abbr':'" . ctor.d . "','dup':1},"
+        endfor
+
+        let s = substitute(s, '\<java\.lang\.', '', 'g')
+        let s = substitute(s, '\<public\s\+', '', 'g')
+        return eval('[' . s . ']')
+    endfunction
+
+    " Name can be a (simple or qualified) package name, or a (simple or qualified)
+    " type name.
+    fu! s:GetMembers(fqn, ...)
+        let list = []
+        let isClass = 0
+
+        let v = s:DoGetInfoByReflection(a:fqn, '-E')
+        if type(v) == type([])
+            let list = v
+        elseif type(v) == type({}) && v != {}
+            if get(v, 'tag', '') == 'PACKAGE'
+                if b:context_type == s:CONTEXT_IMPORT_STATIC || b:context_type == s:CONTEXT_IMPORT
+                    call add(list, {'kind': 'P', 'word': '*;'})
+                endif
+                if b:context_type != s:CONTEXT_PACKAGE_DECL
+                    for c in sort(get(v, 'classes', []))
+                        call add(list, {'kind': 'C', 'word': c})
                     endfor
+                endif
+                for p in sort(get(v, 'subpackages', []))
+                    call add(list, {'kind': 'P', 'word': p})
+                endfor
+            else
+                let isClass = 1
+                let list += s:DoGetMemberList(v, b:context_type == s:CONTEXT_IMPORT || b:context_type == s:CONTEXT_NEED_TYPE ? 13 : b:context_type == s:CONTEXT_IMPORT_STATIC ? 12 : 11)
+            endif
+        endif
 
-                    " convert type name in extends to fqn for class defined in source files
-                    if !has_key(a:t, 'classpath') && has_key(a:t, 'extends')
-                        if has_key(a:t, 'filepath') && a:t.filepath != s:GetCurrentFileKey()
-                            let filepath = a:t.filepath
-                            let packagename = get(s:files[filepath].unit, 'package', '')
-                        else
-                            let filepath = expand('%:p')
-                            let packagename = s:GetPackageName()
+        if !isClass
+            let list += s:DoGetPackageInfoInDirs(a:fqn, b:context_type == s:CONTEXT_PACKAGE_DECL)
+        endif
+
+        return list
+    endfu
+
+    " a:1		incomplete mode
+    " return packages in classes directories or source pathes
+    fu! s:DoGetPackageInfoInDirs(package, onlyPackages, ...)
+        let list = []
+
+        let pathes = s:GetSourceDirs(expand('%:p'))
+        for path in s:GetClassDirs()
+            if index(pathes, path) <= 0
+                call add(pathes, path)
+            endif
+        endfor
+
+        let globpattern  = a:0 > 0 ? a:package . '*' : substitute(a:package, '\.', '/', 'g') . '/*'
+        let matchpattern = a:0 > 0 ? a:package : a:package . '[\\/]'
+        for f in split(globpath(join(pathes, ','), globpattern), "\n")
+            for path in pathes
+                let idx = matchend(f, escape(path, ' \') . '[\\/]\?\C' . matchpattern)
+                if idx != -1
+                    let name = (a:0 > 0 ? a:package : '') . strpart(f, idx)
+                    if f[-5:] == '.java'
+                        if !a:onlyPackages
+                            call add(list, {'kind': 'C', 'word': name[:-6]})
                         endif
-
-                        let extends = a:t.extends
-                        let i = 0
-                        while i < len(extends)
-                            let ci = s:DoGetClassInfo(java_parser#type2Str(extends[i]), filepath, packagename)
-                            if has_key(ci, 'fqn')
-                                let extends[i] = ci.fqn
-                            endif
-                            let i += 1
-                        endwhile
+                    elseif name =~ '^' . s:RE_IDENTIFIER . '$' && isdirectory(f) && f !~# 'CVS$'
+                        call add(list, {'kind': 'P', 'word': name})
                     endif
-
-                    return t
-                endfu
-
-                "fu! s:AddInheritedClassInfo(ci, t, ...)
-                "  let ci = a:ci
-                "  " add inherited fields and methods
-                "  let list = []
-                "  for i in get(a:t, 'extends', [])
-                "    call add(list, java_parser#type2Str(i))
-                "  endfor
-                "
-                "  if has_key(a:t, 'filepath') && a:t.filepath != expand('%:p')
-                "    let filepath = a:t.filepath
-                "    let props = get(s:files, a:t.filepath, {})
-                "    let packagename = get(props.unit, 'package', '')
-                "  else
-                "    let filepath = expand('%:p')
-                "    let packagename = s:GetPackageName()
-                "  endif
-                "
-                "  for id in list
-                "    let ci = s:MergeClassInfo(ci, s:DoGetClassInfo(id, filepath, packagename), a:0 > 0 && a:1)
-                "  endfor
-                "  return ci
-                "endfu
-
-                " To obtain information of the class in current file or current folder, or
-                " even in current project.
-                function! s:DoGetClassInfoFromTags(class)
-                    " find tag of a:class declaration
-                    let tags = taglist('^' . a:class)
-                    let filename = ''
-                    let cmd = ''
-                    for tag in tags
-                        if has_key(tag, 'kind')
-                            if tag['kind'] == 'c'
-                                let filename = tag['filename']
-                                let cmd = tag['cmd']
-                                break
-                            endif
-                        endif
-                    endfor
-
-                    let tags = taglist('^' . (empty(b:incomplete) ? '.*' : b:incomplete) )
-                    if filename != ''
-                        call filter(tags, "v:val['filename'] == '" . filename . "' && has_key(v:val, 'class') ? v:val['class'] == '" . a:class . "' : 1")
-                    endif
-
-                    let ci = {'name': a:class}
-                    " extends and implements
-                    let ci['ctors'] = []
-                    let ci['fields'] = []
-                    let ci['methods'] = []
-
-                    " members
-                    for tag in tags
-                        let member = {'n': tag['name']}
-
-                        " determine kind
-                        let kind = 'm'
-                        if has_key(tag, 'kind')
-                            let kind = tag['kind']
-                        endif
-
-                        let cmd = tag['cmd']
-                        if cmd =~ '\<static\>'
-                            let member['m'] = '1000'
-                        else
-                            let member['m'] = ''
-                        endif
-
-                        let desc = substitute(cmd, '/^\s*', '', '')
-                        let desc = substitute(desc, '\s*{\?\s*$/$', '', '')
-
-                        if kind == 'm'
-                            " description
-                            if cmd =~ '\<static\>'
-                                let desc = substitute(desc, '\s\+static\s\+', ' ', '')
-                            endif
-                            let member['d'] = desc
-
-                            let member['p'] = ''
-                            let member['r'] = ''
-                            if tag['name'] == a:class
-                                call add(ci['ctors'], member)
-                            else
-                                call add(ci['methods'], member)
-                            endif
-                        elseif kind == 'f'
-                            let member['t'] = substitute(desc, '\([a-zA-Z0-9_[\]]\)\s\+\<' . tag['name'] . '\>.*$', '\1', '')
-                            call add(ci['fields'], member)
-                        endif
-                    endfor
-                    return ci
-                endfu
-
-                " package information							{{{2
-
-                fu! s:DoGetInfoByReflection(class, option)
-                    if has_key(s:cache, a:class)
-                        return s:cache[a:class]
-                    endif
-
-                    let res = s:RunReflection(a:option, a:class, 's:DoGetInfoByReflection')
-                    if res =~ '^[{\[]'
-                        let v = eval(res)
-                        if type(v) == type([])
-                            let s:cache[a:class] = sort(v)
-                        elseif type(v) == type({})
-                            if get(v, 'tag', '') =~# '^\(PACKAGE\|CLASSDEF\)$'
-                                let s:cache[a:class] = v
-                            else
-                                call extend(s:cache, v, 'force')
-                            endif
-                        endif
-                        unlet v
-                    else
-                        let b:errormsg = res
-                    endif
-
-                    return get(s:cache, a:class, {})
-                endfu
-
-                " search in members							{{{2
-                " TODO: what about default access?
-                " public for all              
-                " protected for this or super 
-                " private for this            
-                fu! s:CanAccess(mods, kind)
-                    return (a:mods[-4:-4] || a:kind/10 == 0)
-                                \ &&   (a:kind == 1 || a:mods[-1:]
-                                \	|| (a:mods[-3:-3] && (a:kind == 1 || a:kind == 2))
-                                \	|| (a:mods[-2:-2] && a:kind == 1))
-                endfu
-
-                fu! s:SearchMember(ci, name, fullmatch, kind, returnAll, memberkind, ...)
-                    let result = [[], [], []]
-
-                    if a:kind != 13
-                        for m in (a:0 > 0 && a:1 ? [] : get(a:ci, 'fields', [])) + ((a:kind == 1 || a:kind == 2) ? get(a:ci, 'declared_fields', []) : [])
-                            if empty(a:name) || (a:fullmatch ? m.n ==# a:name : m.n =~# '^' . a:name)
-                                if s:CanAccess(m.m, a:kind)
-                                    call add(result[2], m)
-                                endif
-                            endif
-                        endfor
-
-                        for m in (a:0 > 0 && a:1 ? [] : get(a:ci, 'methods', [])) + ((a:kind == 1 || a:kind == 2) ? get(a:ci, 'declared_methods', []) : [])
-                            if empty(a:name) || (a:fullmatch ? m.n ==# a:name : m.n =~# '^' . a:name)
-                                if s:CanAccess(m.m, a:kind)
-                                    call add(result[1], m)
-                                endif
-                            endif
-                        endfor
-                    endif
-
-                    if a:kind/10 != 0
-                        let types = get(a:ci, 'classes', [])
-                        for t in types
-                            if empty(a:name) || (a:fullmatch ? t[strridx(t, '.')+1:] ==# a:name : t[strridx(t, '.')+1:] =~# '^' . a:name)
-                                if !has_key(s:cache, t) || !has_key(s:cache[t], 'flags') || a:kind == 1 || s:cache[t].flags[-1:]
-                                    call add(result[0], t)
-                                endif
-                            endif
-                        endfor
-                    endif
-
-                    " key `classpath` indicates it is a loaded class from classpath
-                    " All public members of a loaded class are stored in current ci
-                    if !has_key(a:ci, 'classpath') || (a:kind == 1 || a:kind == 2)
-                        for i in get(a:ci, 'extends', [])
-                            let ci = s:DoGetClassInfo(java_parser#type2Str(i))
-                            let members = s:SearchMember(ci, a:name, a:fullmatch, a:kind == 1 ? 2 : a:kind, a:returnAll, a:memberkind)
-                            let result[0] += members[0]
-                            let result[1] += members[1]
-                            let result[2] += members[2]
-                        endfor
-                    endif
-                    return result
-                endfu
-
-
-                " generate member list							{{{2
-
-                fu! s:DoGetFieldList(fields)
-                    let s = ''
-                    for field in a:fields
-                        let s .= "{'kind':'" . (s:IsStatic(field.m) ? "F" : "f") . "','word':'" . field.n . "','menu':'" . field.t . "','dup':1},"
-                    endfor
-                    return s
-                endfu
-
-                fu! s:DoGetMethodList(methods, ...)
-                    let paren = a:0 == 0 || !a:1 ? '(' : ''
-                    let s = ''
-                    for method in a:methods
-                        let s .= "{'kind':'" . (s:IsStatic(method.m) ? "M" : "m") . "','word':'" . method.n . paren . "','abbr':'" . method.n . "()','menu':'" . method.d . "','dup':'1'},"
-                    endfor
-                    return s
-                endfu
-
-                " kind:
-                "	0 - for instance, 1 - this, 2 - super, 3 - class, 4 - array, 5 - method result, 6 - primitive type
-                "	11 - for type, with `class` and static member and nested types.
-                "	12 - for import static, no lparen for static methods
-                "	13 - for import or extends or implements, only nested types
-                "	20 - for package
-                fu! s:DoGetMemberList(ci, kind)
-                    if type(a:ci) != type({}) || a:ci == {}
-                        return []
-                    endif
-
-                    let s = a:kind == 11 ? "{'kind': 'C', 'word': 'class', 'menu': 'Class'}," : ''
-
-                    let members = s:SearchMember(a:ci, '', 1, a:kind, 1, 0, a:kind == 2)
-
-                    " add accessible member types
-                    if a:kind / 10 != 0
-                        " Use dup here for member type can share name with field.
-                        for class in members[0]
-                            "for class in get(a:ci, 'classes', [])
-                            let v = get(s:cache, class, {})
-                            if v == {} || v.flags[-1:]
-                                let s .= "{'kind': 'C', 'word': '" . substitute(class, a:ci.name . '\.', '\1', '') . "','dup':1},"
-                            endif
-                        endfor
-                    endif
-
-                    if a:kind != 13
-                        let fieldlist = []
-                        let sfieldlist = []
-                        for field in members[2]
-                            "for field in get(a:ci, 'fields', [])
-                            if s:IsStatic(field['m'])
-                                call add(sfieldlist, field)
-                            elseif a:kind / 10 == 0
-                                call add(fieldlist, field)
-                            endif
-                        endfor
-
-                        let methodlist = []
-                        let smethodlist = []
-                        for method in members[1]
-                            if s:IsStatic(method['m'])
-                                call add(smethodlist, method)
-                            elseif a:kind / 10 == 0
-                                call add(methodlist, method)
-                            endif
-                        endfor
-
-                        if a:kind / 10 == 0
-                            let s .= s:DoGetFieldList(fieldlist)
-                            let s .= s:DoGetMethodList(methodlist)
-                        endif
-                        let s .= s:DoGetFieldList(sfieldlist)
-                        let s .= s:DoGetMethodList(smethodlist, a:kind == 12)
-
-                        let s = substitute(s, '\<' . a:ci.name . '\.', '', 'g')
-                        let s = substitute(s, '\<java\.lang\.', '', 'g')
-                        let s = substitute(s, '\<\(public\|static\|synchronized\|transient\|volatile\|final\|strictfp\|serializable\|native\)\s\+', '', 'g')
-                        endif
-                        return eval('[' . s . ']')
-                    endfu
-
-                    " interface							{{{2
-
-                    function! s:GetMemberList(class)
-                        if s:IsBuiltinType(a:class)
-                            return []
-                        endif
-
-                        return s:DoGetMemberList(s:DoGetClassInfo(a:class), 0)
-                    endfunction
-
-                    fu! s:GetStaticMemberList(class)
-                        return s:DoGetMemberList(s:DoGetClassInfo(a:class), 11)
-                    endfu
-
-                    function! s:GetConstructorList(class)
-                        let ci = s:DoGetClassInfo(a:class)
-                        if empty(ci)
-                            return []
-                        endif
-
-                        let s = ''
-                        for ctor in get(ci, 'ctors', [])
-                            let s .= "{'kind': '+', 'word':'". a:class . "(','abbr':'" . ctor.d . "','dup':1},"
-                        endfor
-
-                        let s = substitute(s, '\<java\.lang\.', '', 'g')
-                        let s = substitute(s, '\<public\s\+', '', 'g')
-                        return eval('[' . s . ']')
-                    endfunction
-
-                    " Name can be a (simple or qualified) package name, or a (simple or qualified)
-                    " type name.
-                    fu! s:GetMembers(fqn, ...)
-                        let list = []
-                        let isClass = 0
-
-                        let v = s:DoGetInfoByReflection(a:fqn, '-E')
-                        if type(v) == type([])
-                            let list = v
-                        elseif type(v) == type({}) && v != {}
-                            if get(v, 'tag', '') == 'PACKAGE'
-                                if b:context_type == s:CONTEXT_IMPORT_STATIC || b:context_type == s:CONTEXT_IMPORT
-                                    call add(list, {'kind': 'P', 'word': '*;'})
-                                endif
-                                if b:context_type != s:CONTEXT_PACKAGE_DECL
-                                    for c in sort(get(v, 'classes', []))
-                                        call add(list, {'kind': 'C', 'word': c})
-                                    endfor
-                                endif
-                                for p in sort(get(v, 'subpackages', []))
-                                    call add(list, {'kind': 'P', 'word': p})
-                                endfor
-                            else	" elseif get(v, 'tag', '') == 'CLASSDEF'
-                                let isClass = 1
-                                let list += s:DoGetMemberList(v, b:context_type == s:CONTEXT_IMPORT || b:context_type == s:CONTEXT_NEED_TYPE ? 13 : b:context_type == s:CONTEXT_IMPORT_STATIC ? 12 : 11)
-                            endif
-                        endif
-
-                        if !isClass
-                            let list += s:DoGetPackageInfoInDirs(a:fqn, b:context_type == s:CONTEXT_PACKAGE_DECL)
-                        endif
-
-                        return list
-                    endfu
-
-                    " a:1		incomplete mode
-                    " return packages in classes directories or source pathes
-                    fu! s:DoGetPackageInfoInDirs(package, onlyPackages, ...)
-                        let list = []
-
-                        let pathes = s:GetSourceDirs(expand('%:p'))
-                        for path in s:GetClassDirs()
-                            if index(pathes, path) <= 0
-                                call add(pathes, path)
-                            endif
-                        endfor
-
-                        let globpattern  = a:0 > 0 ? a:package . '*' : substitute(a:package, '\.', '/', 'g') . '/*'
-                        let matchpattern = a:0 > 0 ? a:package : a:package . '[\\/]'
-                        for f in split(globpath(join(pathes, ','), globpattern), "\n")
-                            for path in pathes
-                                let idx = matchend(f, escape(path, ' \') . '[\\/]\?\C' . matchpattern)
-                                if idx != -1
-                                    let name = (a:0 > 0 ? a:package : '') . strpart(f, idx)
-                                    if f[-5:] == '.java'
-                                        if !a:onlyPackages
-                                            call add(list, {'kind': 'C', 'word': name[:-6]})
-                                        endif
-                                    elseif name =~ '^' . s:RE_IDENTIFIER . '$' && isdirectory(f) && f !~# 'CVS$'
-                                        call add(list, {'kind': 'P', 'word': name})
-                                    endif
-                                endif
-                            endfor
-                        endfor
-                        return list
-                    endfu
-                    " }}}
+                endif
+            endfor
+        endfor
+        return list
+    endfu
+    " }}}
 "}}}
 " vim:set fdm=marker sw=4 ts=4 si foldcolumn:1 expandtab nowrap:
