@@ -387,7 +387,6 @@ function! s:CompleteAfterDot(expr)
         return []
     endif
 
-
     " 0. String literal
     call s:Info('P0. "str".|')
     if items[-1] =~  '"$'
@@ -715,112 +714,111 @@ fu! s:ArrayAccess(arraytype, expr)
 endfu
 
 
-    " Quick information						{{{1
-    function! MyBalloonExpr()
-        if (searchdecl(v:beval_text, 1, 0) == 0)
-            return s:GetVariableDeclaration()
+" Quick information						{{{1
+function! MyBalloonExpr()
+    if (searchdecl(v:beval_text, 1, 0) == 0)
+        return s:GetVariableDeclaration()
+    endif
+    return ''
+    "  return 'Cursor is at line ' . v:beval_lnum .
+    "	\', column ' . v:beval_col .
+    "	\ ' of file ' .  bufname(v:beval_bufnr) .
+    "	\ ' on word "' . v:beval_text . '"'
+endfunction
+"set bexpr=MyBalloonExpr()
+"set ballooneval
+
+" parameters information					{{{1
+fu! javacomplete#CompleteParamsInfo(findstart, base)
+    if a:findstart
+        return col('.') - 1
+    endif
+
+    let mi = s:GetMethodInvocationExpr(s:GetStatement())
+    if empty(mi.method)
+        return []
+    endif
+
+    " TODO: how to determine overloaded functions
+    "let mi.params = s:EvalParams(mi.params)
+    if empty(mi.expr)
+        let methods = s:SearchForName(mi.method, 0, 1)[1]
+        let result = eval('[' . s:DoGetMethodList(methods) . ']')
+    elseif mi.method == '+'
+        let result = s:GetConstructorList(mi.expr)
+    else
+        let result = s:CompleteAfterDot(mi.expr)
+    endif
+
+    if !empty(result)
+        if !empty(mi.method) && mi.method != '+'
+            let result = filter(result, "type(v:val) == type('') ? v:val ==# '" . mi.method . "' : v:val['word'] ==# '" . mi.method . "('")
         endif
-        return ''
-        "  return 'Cursor is at line ' . v:beval_lnum .
-        "	\', column ' . v:beval_col .
-        "	\ ' of file ' .  bufname(v:beval_bufnr) .
-        "	\ ' on word "' . v:beval_text . '"'
-    endfunction
-    "set bexpr=MyBalloonExpr()
-    "set ballooneval
+        return result
 
-    " parameters information					{{{1
-    fu! javacomplete#CompleteParamsInfo(findstart, base)
-        if a:findstart
-            return col('.') - 1
-        endif
+    endif
+endfu
 
+" scanning and parsing							{{{1
 
-        let mi = s:GetMethodInvocationExpr(s:GetStatement())
-        if empty(mi.method)
-            return []
-        endif
+" Search back from the cursor position till meeting '{' or ';'.
+" '{' means statement start, ';' means end of a previous statement.
+" Return: statement before cursor
+" Note: It's the base for parsing. And It's OK for most cases.
+function! s:GetStatement()
+    if getline('.') =~ '^\s*\(import\|package\)\s\+'
+        return strpart(getline('.'), match(getline('.'), '\(import\|package\)'), col('.')-1)
+    endif
 
-        " TODO: how to determine overloaded functions
-        "let mi.params = s:EvalParams(mi.params)
-        if empty(mi.expr)
-            let methods = s:SearchForName(mi.method, 0, 1)[1]
-            let result = eval('[' . s:DoGetMethodList(methods) . ']')
-        elseif mi.method == '+'
-            let result = s:GetConstructorList(mi.expr)
+    let lnum_old = line('.')
+    let col_old = col('.')
+
+    while 1
+        if search('[{};]\|<%\|<%!', 'bW') == 0
+            let lnum = 1
+            let col  = 1
         else
-            let result = s:CompleteAfterDot(mi.expr)
-        endif
-
-        if !empty(result)
-            if !empty(mi.method) && mi.method != '+'
-                let result = filter(result, "type(v:val) == type('') ? v:val ==# '" . mi.method . "' : v:val['word'] ==# '" . mi.method . "('")
+            if s:InCommentOrLiteral(line('.'), col('.'))
+                continue
             endif
-            return result
 
+            normal w
+            let lnum = line('.')
+            let col = col('.')
         endif
-    endfu
+        break
+    endwhile
 
-    " scanning and parsing							{{{1
+    silent call cursor(lnum_old, col_old)
+    return s:MergeLines(lnum, col, lnum_old, col_old)
+endfunction
 
-    " Search back from the cursor position till meeting '{' or ';'.
-    " '{' means statement start, ';' means end of a previous statement.
-    " Return: statement before cursor
-    " Note: It's the base for parsing. And It's OK for most cases.
-    function! s:GetStatement()
-        if getline('.') =~ '^\s*\(import\|package\)\s\+'
-            return strpart(getline('.'), match(getline('.'), '\(import\|package\)'), col('.')-1)
-        endif
+fu! s:MergeLines(lnum, col, lnum_old, col_old)
+    let lnum = a:lnum
+    let col = a:col
 
-        let lnum_old = line('.')
-        let col_old = col('.')
-
-        while 1
-            if search('[{};]\|<%\|<%!', 'bW') == 0
-                let lnum = 1
-                let col  = 1
-            else
-                if s:InCommentOrLiteral(line('.'), col('.'))
-                    continue
-                endif
-
-                normal w
-                let lnum = line('.')
-                let col = col('.')
-            endif
-            break
-        endwhile
-
-        silent call cursor(lnum_old, col_old)
-        return s:MergeLines(lnum, col, lnum_old, col_old)
-    endfunction
-
-    fu! s:MergeLines(lnum, col, lnum_old, col_old)
-        let lnum = a:lnum
-        let col = a:col
-
-        let str = ''
-        if lnum < a:lnum_old
-            let str = s:Prune(strpart(getline(lnum), a:col-1))
+    let str = ''
+    if lnum < a:lnum_old
+        let str = s:Prune(strpart(getline(lnum), a:col-1))
+        let lnum += 1
+        while lnum < a:lnum_old
+            let str  .= s:Prune(getline(lnum))
             let lnum += 1
-            while lnum < a:lnum_old
-                let str  .= s:Prune(getline(lnum))
-                let lnum += 1
-            endwhile
-            let col = 1
-        endif
-        let lastline = strpart(getline(a:lnum_old), col-1, a:col_old-col)
-        let str .= s:Prune(lastline, col)
-        let str = s:RemoveBlockComments(str)
-        " generic in JAVA 5+
-        while match(str, s:RE_TYPE_ARGUMENTS) != -1
-            let str = substitute(str, '\(' . s:RE_TYPE_ARGUMENTS . '\)', '\=repeat(" ", len(submatch(1)))', 'g')
         endwhile
-        let str = substitute(str, '\s\s\+', ' ', 'g')
-        let str = substitute(str, '\([.()]\)[ \t]\+', '\1', 'g')
-        let str = substitute(str, '[ \t]\+\([.()]\)', '\1', 'g')
-        return s:Trim(str) . matchstr(lastline, '\s*$')
-    endfu
+        let col = 1
+    endif
+    let lastline = strpart(getline(a:lnum_old), col-1, a:col_old-col)
+    let str .= s:Prune(lastline, col)
+    let str = s:RemoveBlockComments(str)
+    " generic in JAVA 5+
+    while match(str, s:RE_TYPE_ARGUMENTS) != -1
+        let str = substitute(str, '\(' . s:RE_TYPE_ARGUMENTS . '\)', '\=repeat(" ", len(submatch(1)))', 'g')
+    endwhile
+    let str = substitute(str, '\s\s\+', ' ', 'g')
+    let str = substitute(str, '\([.()]\)[ \t]\+', '\1', 'g')
+    let str = substitute(str, '[ \t]\+\([.()]\)', '\1', 'g')
+    return s:Trim(str) . matchstr(lastline, '\s*$')
+endfu
 
 " Extract a clean expr, removing some non-necessary characters. 
 fu! s:ExtractCleanExpr(expr)
@@ -886,296 +884,297 @@ fu! s:ParseExpr(expr)
     return items
 endfu
 
-    " Given optional argument, call s:ParseExpr() to parser the nonparentheses expr
-    fu! s:ProcessParentheses(expr, ...)
-        let s = matchend(a:expr, '^\s*(')
-        if s != -1
-            let e = s:GetMatchedIndexEx(a:expr, s-1, '(', ')')
-            if e >= 0
-                let tail = strpart(a:expr, e+1)
-                if tail =~ '^\s*[\=$'
-                    return s:ProcessParentheses(strpart(a:expr, s, e-s), 1)
-                elseif tail =~ '^\s*\w'
-                    return [strpart(a:expr, 0, e+1) . 'obj.']
-                endif
+" Given optional argument, call s:ParseExpr() to parser the nonparentheses expr
+fu! s:ProcessParentheses(expr, ...)
+    let s = matchend(a:expr, '^\s*(')
+    if s != -1
+        let e = s:GetMatchedIndexEx(a:expr, s-1, '(', ')')
+        if e >= 0
+            let tail = strpart(a:expr, e+1)
+            if tail =~ '^\s*[\=$'
+                return s:ProcessParentheses(strpart(a:expr, s, e-s), 1)
+            elseif tail =~ '^\s*\w'
+                return [strpart(a:expr, 0, e+1) . 'obj.']
             endif
-
-            " multi-dot-expr except for new expr
-        elseif a:0 > 0 && stridx(a:expr, '.') != match(a:expr, '\.\s*$') && a:expr !~ '^\s*new\s\+'
-            return s:ParseExpr(a:expr)
         endif
-        return [a:expr]
-    endfu
 
-    " return {'expr': , 'method': , 'params': }
-    fu! s:GetMethodInvocationExpr(expr)
-        let idx = strlen(a:expr)-1 
-        while idx >= 0
-            if a:expr[idx] == '('
-                break
-            elseif a:expr[idx] == ')'
-                let idx = s:SearchPairBackward(a:expr, idx, '(', ')')
-            elseif a:expr[idx] == ']'
-                let idx = s:SearchPairBackward(a:expr, idx, '[', ']')
-            endif
-            let idx -= 1
-        endwhile
+        " multi-dot-expr except for new expr
+    elseif a:0 > 0 && stridx(a:expr, '.') != match(a:expr, '\.\s*$') && a:expr !~ '^\s*new\s\+'
+        return s:ParseExpr(a:expr)
+    endif
+    return [a:expr]
+endfu
 
-        let mi = {'expr': strpart(a:expr, 0, idx+1), 'method': '', 'params': strpart(a:expr, idx+1)}
-        let idx = match(mi.expr, '\<new\s\+' . s:RE_QUALID . '\s*(\s*$')
+" return {'expr': , 'method': , 'params': }
+fu! s:GetMethodInvocationExpr(expr)
+    let idx = strlen(a:expr)-1 
+    while idx >= 0
+        if a:expr[idx] == '('
+            break
+        elseif a:expr[idx] == ')'
+            let idx = s:SearchPairBackward(a:expr, idx, '(', ')')
+        elseif a:expr[idx] == ']'
+            let idx = s:SearchPairBackward(a:expr, idx, '[', ']')
+        endif
+        let idx -= 1
+    endwhile
+
+    let mi = {'expr': strpart(a:expr, 0, idx+1), 'method': '', 'params': strpart(a:expr, idx+1)}
+    let idx = match(mi.expr, '\<new\s\+' . s:RE_QUALID . '\s*(\s*$')
+    if idx >= 0
+        let mi.method = '+'
+        let mi.expr = substitute(matchstr(strpart(mi.expr, idx+4), s:RE_QUALID), '\s', '', 'g')
+    else
+        let idx = match(mi.expr, '\<' . s:RE_IDENTIFIER . '\s*(\s*$')
         if idx >= 0
-            let mi.method = '+'
-            let mi.expr = substitute(matchstr(strpart(mi.expr, idx+4), s:RE_QUALID), '\s', '', 'g')
-        else
-            let idx = match(mi.expr, '\<' . s:RE_IDENTIFIER . '\s*(\s*$')
-            if idx >= 0
-                let subs = s:SplitAt(mi.expr, idx-1)
-                let mi.method = substitute(subs[1], '\s*(\s*$', '', '')
-                let mi.expr = s:ExtractCleanExpr(subs[0])
-            endif
+            let subs = s:SplitAt(mi.expr, idx-1)
+            let mi.method = substitute(subs[1], '\s*(\s*$', '', '')
+            let mi.expr = s:ExtractCleanExpr(subs[0])
         endif
-        return mi
-    endfu
+    endif
+    return mi
+endfu
 
-    " Generate Imports							{{{1
-    function! s:GenerateImports()
-        let imports = []
+" Generate Imports							{{{1
+function! s:GenerateImports()
+    let imports = []
 
-        let lnum_old = line('.')
-        let col_old = col('.')
-        call cursor(1, 1)
+    let lnum_old = line('.')
+    let col_old = col('.')
+    call cursor(1, 1)
 
-        if &ft == 'jsp'
-            while 1
-                let lnum = search('\<import\s*=[''"]', 'W')
-                if (lnum == 0)
-                    break
-                endif
-
-                let str = getline(lnum)
-                if str =~ '<%\s*@\s*page\>' || str =~ '<jsp:\s*directive.page\>'
-                    let str = substitute(str, '.*import=[''"]\([a-zA-Z0-9_$.*, \t]\+\)[''"].*', '\1', '')
-                    for item in split(str, ',')
-                        call add(imports, substitute(item, '\s', '', 'g'))
-                    endfor
-                endif
-            endwhile
-        else
-            while 1
-                let lnum = search('\<import\>', 'W')
-                if (lnum == 0)
-                    break
-                elseif !s:InComment(line("."), col(".")-1)
-                    normal w
-                    " TODO: search semicolon or import keyword, excluding comment
-                    let stat = matchstr(getline(lnum)[col('.')-1:], '\(static\s\+\)\?\(' .s:RE_QUALID. '\%(\s*\.\s*\*\)\?\)\s*;')
-                    if !empty(stat)
-                        call add(imports, stat[:-2])
-                    endif
-                endif
-            endwhile
-        endif
-
-        call cursor(lnum_old, col_old)
-        return imports
-    endfunction
-
-    fu! s:GetImports(kind, ...)
-        let filekey = a:0 > 0 && !empty(a:1) ? a:1 : s:GetCurrentFileKey()
-        let props = get(s:files, filekey, {})
-        if !has_key(props, a:kind)
-            let props['imports']	= filekey == s:GetCurrentFileKey() ? s:GenerateImports() : props.unit.imports
-            let props['imports_static']	= []
-            let props['imports_fqn']	= []
-            let props['imports_star']	= ['java.lang.']
-            if &ft == 'jsp' || filekey =~ '\.jsp$'
-                let props.imports_star += ['javax.servlet.', 'javax.servlet.http.', 'javax.servlet.jsp.']
+    if &ft == 'jsp'
+        while 1
+            let lnum = search('\<import\s*=[''"]', 'W')
+            if (lnum == 0)
+                break
             endif
 
-            for import in props.imports
-                let subs = split(substitute(import, '^\s*\(static\s\+\)\?\(' .s:RE_QUALID. '\%(\s*\.\s*\*\)\?\)\s*$', '\1;\2', ''), ';', 1)
-                let qid = substitute(subs[1] , '\s', '', 'g')
-                if !empty(subs[0])
-                    call add(props.imports_static, qid)
-                elseif qid[-1:] == '*'
-                    call add(props.imports_star, qid[:-2])
-                else
-                    call add(props.imports_fqn, qid)
-                endif
-            endfor
-            let s:files[filekey] = props
-        endif
-        return get(props, a:kind, [])
-    endfu
-
-    " search for name in 
-    " return the fqn matched
-    fu! s:SearchSingleTypeImport(name, fqns)
-        let matches = s:filter(a:fqns, 'item =~# ''\<' . a:name . '$''')
-        if len(matches) == 1
-            return matches[0]
-        elseif !empty(matches)
-            echoerr 'Name "' . a:name . '" conflicts between ' . join(matches, ' and ')
-            return matches[0]
-        endif
-        return ''
-    endfu
-
-    " search for name in static imports, return list of members with the same name
-    " return [types, methods, fields]
-    fu! s:SearchStaticImports(name, fullmatch)
-        let result = [[], [], []]
-        let candidates = []		" list of the canonical name
-        for item in s:GetImports('imports_static')
-            if item[-1:] == '*'		" static import on demand
-                call add(candidates, item[:-3])
-            elseif item[strridx(item, '.')+1:] ==# a:name
-                        \ || (!a:fullmatch && item[strridx(item, '.')+1:] =~ '^' . a:name)
-                call add(candidates, item[:strridx(item, '.')])
-            endif
-        endfor
-        if empty(candidates)
-            return result
-        endif
-
-
-        " read type info which are not in cache
-        let commalist = ''
-        for typename in candidates
-            if !has_key(s:cache, typename)
-                let commalist .= typename . ','
-            endif
-        endfor
-        if commalist != ''
-            let res = s:RunReflection('-E', commalist, 's:SearchStaticImports in Batch')
-            if res =~ "^{'"
-                let dict = eval(res)
-                for key in keys(dict)
-                    let s:cache[key] = s:Sort(dict[key])
+            let str = getline(lnum)
+            if str =~ '<%\s*@\s*page\>' || str =~ '<jsp:\s*directive.page\>'
+                let str = substitute(str, '.*import=[''"]\([a-zA-Z0-9_$.*, \t]\+\)[''"].*', '\1', '')
+                for item in split(str, ',')
+                    call add(imports, substitute(item, '\s', '', 'g'))
                 endfor
             endif
-        endif
-
-        " search in all candidates
-        for typename in candidates
-            let ti = get(s:cache, typename, 0)
-            if type(ti) == type({}) && get(ti, 'tag', '') == 'CLASSDEF'
-                let members = s:SearchMember(ti, a:name, a:fullmatch, 12, 1, 0)
-                let result[1] += members[1]
-                let result[2] += members[2]
-                "let pattern = 'item.n ' . (a:fullmatch ? '==# ''' : '=~# ''^') . a:name . ''' && s:IsStatic(item.m)'
-                "let result[1] += s:filter(get(ti, 'methods', []), pattern)
-                "let result[2]  += s:filter(get(ti, 'fields', []),  pattern)
-            else
-                " TODO: mark the wrong import declaration.
-            endif
-        endfor
-        return result
-    endfu
-
-
-    " search decl							{{{1
-    " Return: The declaration of identifier under the cursor
-    " Note: The type of a variable must be imported or a fqn.
-    function! s:GetVariableDeclaration()
-        let lnum_old = line('.')
-        let col_old = col('.')
-
-        silent call search('[^a-zA-Z0-9$_.,?<>[\] \t\r\n]', 'bW')	" call search('[{};(,]', 'b')
-        normal w
-        let lnum = line('.')
-        let col = col('.')
-        if (lnum == lnum_old && col == col_old)
-            return ''
-        endif
-
-        "  silent call search('[;){]')
-        "  let lnum_end = line('.')
-        "  let col_end  = col('.')
-        "  let declaration = ''
-        "  while (lnum <= lnum_end)
-        "    let declaration = declaration . getline(lnum)
-        "    let lnum = lnum + 1
-        "  endwhile
-        "  let declaration = strpart(declaration, col-1)
-        "  let declaration = substitute(declaration, '\.[ \t]\+', '.', 'g')
-
-        silent call cursor(lnum_old, col_old)
-        return s:MergeLines(lnum, col, lnum_old, col_old)
-    endfunction
-
-    function! s:FoundClassDeclaration(type)
-        let lnum_old = line('.')
-        let col_old = col('.')
-        call cursor(1, 1)
+        endwhile
+    else
         while 1
-            let lnum = search('\<\C\(class\|interface\|enum\)[ \t\n\r]\+' . a:type . '[< \t\n\r]', 'W')
-            if lnum == 0 || !s:InCommentOrLiteral(line('.'), col('.'))
+            let lnum = search('\<import\>', 'W')
+            if (lnum == 0)
                 break
+            elseif !s:InComment(line("."), col(".")-1)
+                normal w
+                " TODO: search semicolon or import keyword, excluding comment
+                let stat = matchstr(getline(lnum)[col('.')-1:], '\(static\s\+\)\?\(' .s:RE_QUALID. '\%(\s*\.\s*\*\)\?\)\s*;')
+                if !empty(stat)
+                    call add(imports, stat[:-2])
+                endif
             endif
         endwhile
+    endif
 
-        " search mainly for the cases: " class /* block comment */ Ident"
-        "				 " class // comment \n Ident "
-        if lnum == 0
-            let found = 0
-            while !found
-                let lnum = search('\<\C\(class\|interface\|enum\)[ \t\n\r]\+', 'W')
-                if lnum == 0
-                    break
-                elseif s:InCommentOrLiteral(line('.'), col('.'))
-                    continue
-                else
+    call cursor(lnum_old, col_old)
+    return imports
+endfunction
+
+fu! s:GetImports(kind, ...)
+    let filekey = a:0 > 0 && !empty(a:1) ? a:1 : s:GetCurrentFileKey()
+    let props = get(s:files, filekey, {})
+
+    if !has_key(props, a:kind)
+        let props['imports']	= filekey == s:GetCurrentFileKey() ? s:GenerateImports() : props.unit.imports
+        let props['imports_static']	= []
+        let props['imports_fqn']	= []
+        let props['imports_star']	= ['java.lang.']
+        if &ft == 'jsp' || filekey =~ '\.jsp$'
+            let props.imports_star += ['javax.servlet.', 'javax.servlet.http.', 'javax.servlet.jsp.']
+        endif
+
+        for import in props.imports
+            let subs = split(substitute(import, '^\s*\(static\s\+\)\?\(' .s:RE_QUALID. '\%(\s*\.\s*\*\)\?\)\s*$', '\1;\2', ''), ';', 1)
+            let qid = substitute(subs[1] , '\s', '', 'g')
+            if !empty(subs[0])
+                call add(props.imports_static, qid)
+            elseif qid[-1:] == '*'
+                call add(props.imports_star, qid[:-2])
+            else
+                call add(props.imports_fqn, qid)
+            endif
+        endfor
+        let s:files[filekey] = props
+    endif
+    return get(props, a:kind, [])
+endfu
+
+" search for name in 
+" return the fqn matched
+fu! s:SearchSingleTypeImport(name, fqns)
+    let matches = s:filter(a:fqns, 'item =~# ''\<' . a:name . '$''')
+    if len(matches) == 1
+        return matches[0]
+    elseif !empty(matches)
+        echoerr 'Name "' . a:name . '" conflicts between ' . join(matches, ' and ')
+        return matches[0]
+    endif
+    return ''
+endfu
+
+" search for name in static imports, return list of members with the same name
+" return [types, methods, fields]
+fu! s:SearchStaticImports(name, fullmatch)
+    let result = [[], [], []]
+    let candidates = []		" list of the canonical name
+    for item in s:GetImports('imports_static')
+        if item[-1:] == '*'		" static import on demand
+            call add(candidates, item[:-3])
+        elseif item[strridx(item, '.')+1:] ==# a:name
+                    \ || (!a:fullmatch && item[strridx(item, '.')+1:] =~ '^' . a:name)
+            call add(candidates, item[:strridx(item, '.')])
+        endif
+    endfor
+    if empty(candidates)
+        return result
+    endif
+
+
+    " read type info which are not in cache
+    let commalist = ''
+    for typename in candidates
+        if !has_key(s:cache, typename)
+            let commalist .= typename . ','
+        endif
+    endfor
+    if commalist != ''
+        let res = s:RunReflection('-E', commalist, 's:SearchStaticImports in Batch')
+        if res =~ "^{'"
+            let dict = eval(res)
+            for key in keys(dict)
+                let s:cache[key] = s:Sort(dict[key])
+            endfor
+        endif
+    endif
+
+    " search in all candidates
+    for typename in candidates
+        let ti = get(s:cache, typename, 0)
+        if type(ti) == type({}) && get(ti, 'tag', '') == 'CLASSDEF'
+            let members = s:SearchMember(ti, a:name, a:fullmatch, 12, 1, 0)
+            let result[1] += members[1]
+            let result[2] += members[2]
+            "let pattern = 'item.n ' . (a:fullmatch ? '==# ''' : '=~# ''^') . a:name . ''' && s:IsStatic(item.m)'
+            "let result[1] += s:filter(get(ti, 'methods', []), pattern)
+            "let result[2]  += s:filter(get(ti, 'fields', []),  pattern)
+        else
+            " TODO: mark the wrong import declaration.
+        endif
+    endfor
+    return result
+endfu
+
+
+" search decl							{{{1
+" Return: The declaration of identifier under the cursor
+" Note: The type of a variable must be imported or a fqn.
+function! s:GetVariableDeclaration()
+    let lnum_old = line('.')
+    let col_old = col('.')
+
+    silent call search('[^a-zA-Z0-9$_.,?<>[\] \t\r\n]', 'bW')	" call search('[{};(,]', 'b')
+    normal w
+    let lnum = line('.')
+    let col = col('.')
+    if (lnum == lnum_old && col == col_old)
+        return ''
+    endif
+
+    "  silent call search('[;){]')
+    "  let lnum_end = line('.')
+    "  let col_end  = col('.')
+    "  let declaration = ''
+    "  while (lnum <= lnum_end)
+    "    let declaration = declaration . getline(lnum)
+    "    let lnum = lnum + 1
+    "  endwhile
+    "  let declaration = strpart(declaration, col-1)
+    "  let declaration = substitute(declaration, '\.[ \t]\+', '.', 'g')
+
+    silent call cursor(lnum_old, col_old)
+    return s:MergeLines(lnum, col, lnum_old, col_old)
+endfunction
+
+function! s:FoundClassDeclaration(type)
+    let lnum_old = line('.')
+    let col_old = col('.')
+    call cursor(1, 1)
+    while 1
+        let lnum = search('\<\C\(class\|interface\|enum\)[ \t\n\r]\+' . a:type . '[< \t\n\r]', 'W')
+        if lnum == 0 || !s:InCommentOrLiteral(line('.'), col('.'))
+            break
+        endif
+    endwhile
+
+    " search mainly for the cases: " class /* block comment */ Ident"
+    "				 " class // comment \n Ident "
+    if lnum == 0
+        let found = 0
+        while !found
+            let lnum = search('\<\C\(class\|interface\|enum\)[ \t\n\r]\+', 'W')
+            if lnum == 0
+                break
+            elseif s:InCommentOrLiteral(line('.'), col('.'))
+                continue
+            else
+                normal w
+                " skip empty line
+                while getline(line('.'))[col('.')-1] == ''
                     normal w
-                    " skip empty line
-                    while getline(line('.'))[col('.')-1] == ''
-                        normal w
-                    endwhile
-                    let lnum = line('.')
-                    let col = col('.')
-                    while 1
-                        if match(getline(lnum)[col-1:], '^[ \t\n\r]*' . a:type . '[< \t\n\r]') >= 0
-                            let found = 1
-                            " meets comment
-                        elseif match(getline(lnum)[col-1:], '^[ \t\n\r]*\(//\|/\*\)') >= 0
-                            if getline(lnum)[col-1:col] == '//'
-                                normal $eb
-                            else
-                                let lnum = search('\*\/', 'W')
-                                if lnum == 0
-                                    break
-                                endif
-                                normal web
+                endwhile
+                let lnum = line('.')
+                let col = col('.')
+                while 1
+                    if match(getline(lnum)[col-1:], '^[ \t\n\r]*' . a:type . '[< \t\n\r]') >= 0
+                        let found = 1
+                        " meets comment
+                    elseif match(getline(lnum)[col-1:], '^[ \t\n\r]*\(//\|/\*\)') >= 0
+                        if getline(lnum)[col-1:col] == '//'
+                            normal $eb
+                        else
+                            let lnum = search('\*\/', 'W')
+                            if lnum == 0
+                                break
                             endif
-                            let lnum = line('.')
-                            let col = col('.')
-                            continue
+                            normal web
                         endif
-                        break
-                    endwhile
-                endif
-            endwhile
-        endif
+                        let lnum = line('.')
+                        let col = col('.')
+                        continue
+                    endif
+                    break
+                endwhile
+            endif
+        endwhile
+    endif
 
-        silent call cursor(lnum_old, col_old)
-        return lnum
-    endfu
+    silent call cursor(lnum_old, col_old)
+    return lnum
+endfu
 
-    fu! s:FoundClassLocally(type)
-        " current path
-        if globpath(expand('%:p:h'), a:type . '.java') != ''
-            return 1
-        endif
+fu! s:FoundClassLocally(type)
+    " current path
+    if globpath(expand('%:p:h'), a:type . '.java') != ''
+        return 1
+    endif
 
-        " 
-        let srcpath = javacomplete#GetSourcePath(1)
-        let file = globpath(srcpath, substitute(fqn, '\.', '/', 'g') . '.java')
-        if file != ''
-            return 1
-        endif
+    " 
+    let srcpath = javacomplete#GetSourcePath(1)
+    let file = globpath(srcpath, substitute(fqn, '\.', '/', 'g') . '.java')
+    if file != ''
+        return 1
+    endif
 
-        return 0
-    endfu
+    return 0
+endfu
 
     " regexp samples:
     " echo search('\(\(public\|protected|private\)[ \t\n\r]\+\)\?\(\(static\)[ \t\n\r]\+\)\?\(\<class\>\|\<interface\>\)[ \t\n\r]\+HelloWorld[^a-zA-Z0-9_$]', 'W')
@@ -1325,56 +1324,56 @@ endfu
         return get(a:methods, 0, {})
     endfu
 
-    " Parser.GetType() in insenvim
-    function! s:GetDeclaredClassName(var)
-        let var = s:Trim(a:var)
-        call s:Trace('GetDeclaredClassName for "' . var . '"')
-        if var =~# '^\(this\|super\)$'
-            return var
+" Parser.GetType() in insenvim
+function! s:GetDeclaredClassName(var)
+    let var = s:Trim(a:var)
+    call s:Trace('GetDeclaredClassName for "' . var . '"')
+    if var =~# '^\(this\|super\)$'
+        return var
+    endif
+
+
+    " Special handling for builtin objects in JSP
+    if &ft == 'jsp'
+        if get(s:JSP_BUILTIN_OBJECTS, a:var, '') != ''
+            return s:JSP_BUILTIN_OBJECTS[a:var]
         endif
+    endif
+
+    " use java_parser.vim
+    if javacomplete#GetSearchdeclMethod() == 4
+        let variable = get(s:SearchForName(var, 1, 1)[2], -1, {})
+        return get(variable, 'tag', '') == 'VARDEF' ? java_parser#type2Str(variable.vartype) : get(variable, 't', '')
+    endif
 
 
-        " Special handling for builtin objects in JSP
-        if &ft == 'jsp'
-            if get(s:JSP_BUILTIN_OBJECTS, a:var, '') != ''
-                return s:JSP_BUILTIN_OBJECTS[a:var]
-            endif
+    let ic = &ignorecase
+    setlocal noignorecase
+
+    let searched = javacomplete#GetSearchdeclMethod() == 2 ? s:Searchdecl(var, 1, 0) : searchdecl(var, 1, 0)
+    if (searched == 0)
+        " code sample:
+        " String tmp; java.
+        " 	lang.  String str, value;
+        " for (int i = 0, j = 0; i < 10; i++) {
+        "   j = 0;
+        " }
+        let declaration = s:GetVariableDeclaration()
+        " Assume it a class member, and remove modifiers
+        let class = substitute(declaration, '^\(public\s\+\|protected\s\+\|private\s\+\|abstract\s\+\|static\s\+\|final\s\+\|native\s\+\)*', '', '')
+        let class = substitute(class, '\s*\([a-zA-Z0-9_.]\+\)\(\[\]\)\?\s\+.*', '\1\2', '')
+        let class = substitute(class, '\([a-zA-Z0-9_.]\)<.*', '\1', '')
+        call s:Info('class: "' . class . '" declaration: "' . declaration . '" for ' . a:var)
+        let &ignorecase = ic
+        if class != '' && class !=# a:var && class !=# 'import' && class !=# 'class'
+            return class
         endif
+    endif
 
-        " use java_parser.vim
-        if javacomplete#GetSearchdeclMethod() == 4
-            let variable = get(s:SearchForName(var, 1, 1)[2], -1, {})
-            return get(variable, 'tag', '') == 'VARDEF' ? java_parser#type2Str(variable.vartype) : get(variable, 't', '')
-        endif
-
-
-        let ic = &ignorecase
-        setlocal noignorecase
-
-        let searched = javacomplete#GetSearchdeclMethod() == 2 ? s:Searchdecl(var, 1, 0) : searchdecl(var, 1, 0)
-        if (searched == 0)
-            " code sample:
-            " String tmp; java.
-            " 	lang.  String str, value;
-            " for (int i = 0, j = 0; i < 10; i++) {
-            "   j = 0;
-            " }
-            let declaration = s:GetVariableDeclaration()
-            " Assume it a class member, and remove modifiers
-            let class = substitute(declaration, '^\(public\s\+\|protected\s\+\|private\s\+\|abstract\s\+\|static\s\+\|final\s\+\|native\s\+\)*', '', '')
-                let class = substitute(class, '\s*\([a-zA-Z0-9_.]\+\)\(\[\]\)\?\s\+.*', '\1\2', '')
-                let class = substitute(class, '\([a-zA-Z0-9_.]\)<.*', '\1', '')
-                call s:Info('class: "' . class . '" declaration: "' . declaration . '" for ' . a:var)
-                let &ignorecase = ic
-                if class != '' && class !=# a:var && class !=# 'import' && class !=# 'class'
-                    return class
-                endif
-            endif
-
-            let &ignorecase = ic
-            call s:Trace('GetDeclaredClassName: cannot find')
-            return ''
-        endfunction
+    let &ignorecase = ic
+    call s:Trace('GetDeclaredClassName: cannot find')
+    return ''
+endfunction
 
         " using java_parser.vim					{{{1
         " javacomplete#parse()					{{{2
@@ -1582,21 +1581,21 @@ endfu
                     return a:qn[strridx(a:qn, '.')+1:]
                 endfu
 
-                " options								{{{1
-                " Methods to search declaration						{{{2
-                "	1 - by builtin searchdecl()
-                "	2 - by special Searchdecl()
-                "	4 - by java_parser
-                fu! javacomplete#GetSearchdeclMethod()
-                    if &ft == 'jsp'
-                        return 1
-                    endif
-                    return exists('s:searchdecl') ? s:searchdecl : 4
-                endfu
+" options								{{{1
+" Methods to search declaration						{{{2
+"	1 - by builtin searchdecl()
+"	2 - by special Searchdecl()
+"	4 - by java_parser
+fu! javacomplete#GetSearchdeclMethod()
+    if &ft == 'jsp'
+        return 1
+    endif
+    return exists('s:searchdecl') ? s:searchdecl : 4
+endfu
 
-                fu! javacomplete#SetSearchdeclMethod(method)
-                    let s:searchdecl = a:method
-                endfu
+fu! javacomplete#SetSearchdeclMethod(method)
+    let s:searchdecl = a:method
+endfu
 
                 " JDK1.1								{{{2
                 fu! javacomplete#UseJDK11()
@@ -1924,159 +1923,159 @@ endfu
                     return result
                 endfu
 
-                fu! s:Trim(str)
-                    let str = substitute(a:str, '^\s*', '', '')
-                    return substitute(str, '\s*$', '', '')
-                endfu
+fu! s:Trim(str)
+    let str = substitute(a:str, '^\s*', '', '')
+    return substitute(str, '\s*$', '', '')
+endfu
 
-                fu! s:SplitAt(str, index)
-                    return [strpart(a:str, 0, a:index+1), strpart(a:str, a:index+1)]
-                endfu
+fu! s:SplitAt(str, index)
+    return [strpart(a:str, 0, a:index+1), strpart(a:str, a:index+1)]
+endfu
 
-                " TODO: search pair used in string, like 
-                " 	'create(ao.fox("("), new String).foo().'
-                function! s:GetMatchedIndexEx(str, idx, one, another)
-                    let pos = a:idx
-                    while 0 <= pos && pos < len(a:str)
-                        let pos = match(a:str, '['. a:one . escape(a:another, ']') .']', pos+1)
-                        if pos != -1
-                            if a:str[pos] == a:one
-                                let pos = s:GetMatchedIndexEx(a:str, pos, a:one, a:another)
-                            elseif a:str[pos] == a:another
-                                break
-                            endif
-                        endif
-                    endwhile
-                    return 0 <= pos && pos < len(a:str) ? pos : -3
-                endfunction
+" TODO: search pair used in string, like 
+" 	'create(ao.fox("("), new String).foo().'
+function! s:GetMatchedIndexEx(str, idx, one, another)
+    let pos = a:idx
+    while 0 <= pos && pos < len(a:str)
+        let pos = match(a:str, '['. a:one . escape(a:another, ']') .']', pos+1)
+        if pos != -1
+            if a:str[pos] == a:one
+                let pos = s:GetMatchedIndexEx(a:str, pos, a:one, a:another)
+            elseif a:str[pos] == a:another
+                break
+            endif
+        endif
+    endwhile
+    return 0 <= pos && pos < len(a:str) ? pos : -3
+endfunction
 
-                function! s:SearchPairBackward(str, idx, one, another)
-                    let idx = a:idx
-                    let n = 0
-                    while idx >= 0
-                        let idx -= 1
-                        if a:str[idx] == a:one
-                            if n == 0
-                                break
-                            endif
-                            let n -= 1
-                        elseif a:str[idx] == a:another  " nested 
-                            let n += 1
-                        endif
-                    endwhile
-                    return idx
-                endfunction
+function! s:SearchPairBackward(str, idx, one, another)
+    let idx = a:idx
+    let n = 0
+    while idx >= 0
+        let idx -= 1
+        if a:str[idx] == a:one
+            if n == 0
+                break
+            endif
+            let n -= 1
+        elseif a:str[idx] == a:another  " nested 
+            let n += 1
+        endif
+    endwhile
+    return idx
+endfunction
 
-                fu! s:CountDims(str)
-                    if match(a:str, '[[\]]') == -1
-                        return 0
-                    endif
+fu! s:CountDims(str)
+    if match(a:str, '[[\]]') == -1
+        return 0
+    endif
 
-                    " int[] -> [I, String[] -> 
-                    let dims = len(matchstr(a:str, '^[\+'))
-                    if dims == 0
-                        let idx = len(a:str)-1
-                        while idx >= 0 && a:str[idx] == ']'
-                            let dims += 1
-                            let idx = s:SearchPairBackward(a:str, idx, '[', ']')-1
-                        endwhile
-                    endif
-                    return dims
-                endfu
+    " int[] -> [I, String[] -> 
+    let dims = len(matchstr(a:str, '^[\+'))
+    if dims == 0
+        let idx = len(a:str)-1
+        while idx >= 0 && a:str[idx] == ']'
+            let dims += 1
+            let idx = s:SearchPairBackward(a:str, idx, '[', ']')-1
+        endwhile
+    endif
+    return dims
+endfu
 
-                fu! s:GotoUpperBracket()
-                    let searched = 0
-                    while (!searched)
-                        call search('[{}]', 'bW')
-                        if getline('.')[col('.')-1] == '}'
-                            normal %
-                        else
-                            let searched = 1
-                        endif
-                    endwhile
-                endfu
+fu! s:GotoUpperBracket()
+    let searched = 0
+    while (!searched)
+        call search('[{}]', 'bW')
+        if getline('.')[col('.')-1] == '}'
+            normal %
+        else
+            let searched = 1
+        endif
+    endwhile
+endfu
 
-                " Improve recognition of variable declaration using my version of searchdecl() for accuracy reason.
-                " TODO:
-                fu! s:Searchdecl(name, ...)
-                    let global = a:0 > 0 ? a:1 : 0
-                    let thisblock = a:0 > 1 ? a:2 : 1
+" Improve recognition of variable declaration using my version of searchdecl() for accuracy reason.
+" TODO:
+fu! s:Searchdecl(name, ...)
+    let global = a:0 > 0 ? a:1 : 0
+    let thisblock = a:0 > 1 ? a:2 : 1
 
-                    call search('\<' . a:name . '\>', 'bW')
-                    let lnum_old = line('.')
-                    let col_old = col('.')
+    call search('\<' . a:name . '\>', 'bW')
+    let lnum_old = line('.')
+    let col_old = col('.')
 
-                    call s:GotoUpperBracket()
-                    let lnum_bracket = line('.')
-                    let col_bracket = col('.')
-                    call search('\<' . a:name . '\>', 'W', lnum_old)
-                    if line('.') != lnum_old || col('.') != col_old
-                        return 0
-                    endif
+    call s:GotoUpperBracket()
+    let lnum_bracket = line('.')
+    let col_bracket = col('.')
+    call search('\<' . a:name . '\>', 'W', lnum_old)
+    if line('.') != lnum_old || col('.') != col_old
+        return 0
+    endif
 
-                    " search globally
-                    if global
-                        call cursor(lnum_bracket, col_bracket)
-                        " search backward
-                        while (1)
-                            if search('\([{}]\|\<' . a:name . '\>\)', 'bW') == 0
-                                break
-                            endif
-                            if s:InComment(line('.'), col('.')) "|| s:InStringLiteral()
-                                continue
-                            endif
-                            let cword = expand('<cword>')
-                            if cword == a:name
-                                return 0
-                            endif
-                            if getline('.')[col('.')-1] == '}'
-                                normal %
-                            endif
-                        endwhile
+    " search globally
+    if global
+        call cursor(lnum_bracket, col_bracket)
+        " search backward
+        while (1)
+            if search('\([{}]\|\<' . a:name . '\>\)', 'bW') == 0
+                break
+            endif
+            if s:InComment(line('.'), col('.')) "|| s:InStringLiteral()
+                continue
+            endif
+            let cword = expand('<cword>')
+            if cword == a:name
+                return 0
+            endif
+            if getline('.')[col('.')-1] == '}'
+                normal %
+            endif
+        endwhile
 
-                        call cursor(lnum_old, col_old)
-                        " search forward
-                        call search('[{};]', 'W')
-                        while (1)
-                            if search('\([{}]\|\<' . a:name . '\>\)', 'W') == 0
-                                break
-                            endif
-                            if s:InComment(line('.'), col('.')) "|| s:InStringLiteral()
-                                continue
-                            endif
-                            let cword = expand('<cword>')
-                            if cword == a:name
-                                return 0
-                            endif
-                            if getline('.')[col('.')-1] == '{'
-                                normal %
-                            endif
-                        endwhile
-                    endif
-                    return 1
-                endfu
-                "nmap <F8> :call <SID>Searchdecl(expand('<cword>'))<CR>
+        call cursor(lnum_old, col_old)
+        " search forward
+        call search('[{};]', 'W')
+        while (1)
+            if search('\([{}]\|\<' . a:name . '\>\)', 'W') == 0
+                break
+            endif
+            if s:InComment(line('.'), col('.')) "|| s:InStringLiteral()
+                continue
+            endif
+            let cword = expand('<cword>')
+            if cword == a:name
+                return 0
+            endif
+            if getline('.')[col('.')-1] == '{'
+                normal %
+            endif
+        endwhile
+    endif
+    return 1
+endfu
+"nmap <F8> :call <SID>Searchdecl(expand('<cword>'))<CR>
 
-                fu! javacomplete#Exe(cmd)
-                    exe a:cmd
-                endfu
+fu! javacomplete#Exe(cmd)
+    exe a:cmd
+endfu
 
-                " cache utilities							{{{1
+" cache utilities							{{{1
 
-                " key of s:files for current buffer. It may be the full path of current file or the bufnr of unnamed buffer, and is updated when BufEnter, BufLeave.
-                fu! s:GetCurrentFileKey()
-                    return has("autocmd") ? s:curfilekey : empty(expand('%')) ? bufnr('%') : expand('%:p')
-                endfu
+" key of s:files for current buffer. It may be the full path of current file or the bufnr of unnamed buffer, and is updated when BufEnter, BufLeave.
+fu! s:GetCurrentFileKey()
+    return has("autocmd") ? s:curfilekey : empty(expand('%')) ? bufnr('%') : expand('%:p')
+endfu
 
-                fu! s:SetCurrentFileKey()
-                    let s:curfilekey = empty(expand('%')) ? bufnr('%') : expand('%:p')
-                endfu
+fu! s:SetCurrentFileKey()
+    let s:curfilekey = empty(expand('%')) ? bufnr('%') : expand('%:p')
+endfu
 
-                call s:SetCurrentFileKey()
-                if has("autocmd")
-                    autocmd BufEnter *.java call s:SetCurrentFileKey()
-                    autocmd FileType java call s:SetCurrentFileKey()
-                endif
+call s:SetCurrentFileKey()
+if has("autocmd")
+    autocmd BufEnter *.java call s:SetCurrentFileKey()
+    autocmd FileType java call s:SetCurrentFileKey()
+endif
 
 
 " Log utilities								{{{1
@@ -2132,310 +2131,310 @@ fu! s:System(cmd, caller)
     return res
 endfu
 
-                " functions to get information						{{{1
-                " utilities								{{{2
-                fu! s:MemberCompare(m1, m2)
-                    return a:m1['n'] == a:m2['n'] ? 0 : a:m1['n'] > a:m2['n'] ? 1 : -1
-                endfu
+" functions to get information						{{{1
+" utilities								{{{2
+fu! s:MemberCompare(m1, m2)
+    return a:m1['n'] == a:m2['n'] ? 0 : a:m1['n'] > a:m2['n'] ? 1 : -1
+endfu
 
-                fu! s:Sort(ci)
-                    let ci = a:ci
-                    if has_key(ci, 'fields')
-                        call sort(ci['fields'], 's:MemberCompare')
+fu! s:Sort(ci)
+    let ci = a:ci
+    if has_key(ci, 'fields')
+        call sort(ci['fields'], 's:MemberCompare')
+    endif
+    if has_key(ci, 'methods')
+        call sort(ci['methods'], 's:MemberCompare')
+    endif
+    return ci
+endfu
+
+" Function to run Reflection						{{{2
+fu! s:RunReflection(option, args, log)
+    let classpath = ''
+    if !exists('s:isjdk11')
+        let classpath = ' -classpath "' . s:GetClassPath() . '" '
+    endif
+
+    let cmd = javacomplete#GetJVMLauncher() . classpath . ' Reflection ' . a:option . ' "' . a:args . '"'
+    return s:System(cmd, a:log)
+endfu
+" class information							{{{2
+
+
+" The standard search order of a FQN is as follows:
+" 1. a file-name toplevel type or static member type accessed by the file-name type declared in source files
+" 2. other types declared in source files
+" 3. an accessible loadable type.
+" parameters:
+"   fqns	- list of fqn
+"   srcpaths	- a comma-separated list of directory names.
+"   a:1		- search all.
+" return	a dict of fqn -> type info
+" precondition: 
+" NOTE: call expand() to convert path to standard form
+fu! s:DoGetTypeInfoForFQN(fqns, srcpath, ...)
+    if empty(a:fqns) || empty(a:srcpath)
+        return
+    endif
+
+    " 1
+    let files = {}	" fqn -> java file path
+    for fqn in a:fqns
+        " toplevel type
+        let filepath = globpath(a:srcpath, substitute(fqn, '\.', '/', 'g') . '.java')
+        if filepath != ''
+            let files[fqn] = expand(filepath)
+
+            " nested type
+        elseif stridx(fqn, '.') >= 0
+            let idents = split(fqn, '\.')
+            let i = len(idents)-2
+            while i >= 0
+                let filepath = globpath(a:srcpath, join(idents[:i], '/') . '.java')
+                if filepath != ''
+                    let files[fqn] = expand(filepath)
+                    break
+                endif
+                let i -= 1
+            endwhile
+        endif
+    endfor
+
+
+    " 2
+    let dirs = {}		" dir.idents	-> names of nested type
+    " dir.qfitems	-> items of quick fix
+    " dir.fqn	-> fqn
+    for fqn in a:fqns
+        if !has_key(files, fqn)
+            for path in split(a:srcpath, ',')
+                let idents = split(fqn, '\.')
+                let i = len(idents)-2
+                while i >= 0
+                    let dirpath = path . '/' . join(idents[:i], '/')
+                    " it is a package
+                    if isdirectory(dirpath)
+                        let dirs[fnamemodify(dirpath, ':p:h:gs?[\\/]\+?/?')] = {'fqn': fqn, 'idents': idents[i+1:]}
+                        break
                     endif
-                    if has_key(ci, 'methods')
-                        call sort(ci['methods'], 's:MemberCompare')
+                    let i -= 1
+                endwhile
+            endfor
+        endif
+    endfor
+
+    if !empty(dirs)
+        let items = {}	" dir -> items of quick fix
+
+        let filepatterns = ''
+        for dirpath in keys(dirs)
+            let filepatterns .= escape(dirpath, ' \') . '/*.java '
+        endfor
+
+        let cwd = fnamemodify(expand('%:p:h'), ':p:h:gs?[\\/]\+?/?')
+        exe 'vimgrep /\s*' . s:RE_TYPE_DECL . '/jg ' . filepatterns
+        for item in getqflist()
+            if item.text !~ '^\s*\*\s\+'
+                let text = matchstr(s:Prune(item.text, -1), '\s*' . s:RE_TYPE_DECL)
+                if text != ''
+                    let subs = split(substitute(text, '\s*' . s:RE_TYPE_DECL, '\1;\2;\3', ''), ';', 1)
+                    let dirpath = fnamemodify(bufname(item.bufnr), ':p:h:gs?[\\/]\+?/?')
+                    let idents = dirs[dirpath].idents
+                    if index(idents, subs[2]) >= 0 && (subs[0] =~ '\C\<public\>' || dirpath == cwd)	" FIXME?
+                        let item.subs = subs
+                        let dirs[dirpath].qfitems = get(dirs[dirpath], 'qfitems', []) + [item]
                     endif
-                    return ci
-                endfu
+                endif
+            endif
+        endfor
 
-                " Function to run Reflection						{{{2
-                fu! s:RunReflection(option, args, log)
-                    let classpath = ''
-                    if !exists('s:isjdk11')
-                        let classpath = ' -classpath "' . s:GetClassPath() . '" '
+        for dirpath in keys(dirs)
+            " a. names of nested type must be existed in the same file
+            "	PackageName.NonFileNameTypeName.NestedType.NestedNestedType
+            let qfitems = get(dirs[dirpath], 'qfitems', [])
+            let nr = 0
+            for ident in dirs[dirpath].idents
+                for item in qfitems
+                    if item.subs[2] == ident
+                        let nr += 1
                     endif
+                endfor
+            endfor
+            if nr == len(dirs[dirpath].idents)
+                " b. TODO: Check whether one enclosed another is correct
+                let files[fqn] = expand(bufname(qfitems[0].bufnr))
+            endif
+        endfor
+    endif
 
-                    let cmd = javacomplete#GetJVMLauncher() . classpath . ' Reflection ' . a:option . ' "' . a:args . '"'
-                    return s:System(cmd, a:log)
-                endfu
-                " class information							{{{2
+
+    call s:Info('FQN1&2: ' . string(keys(files)))
+    for fqn in keys(files)
+        if !has_key(s:cache, fqn) || get(get(s:files, files[fqn], {}), 'modifiedtime', 0) != getftime(files[fqn])
+            let ti = s:GetClassInfoFromSource(fqn[strridx(fqn, '.')+1:], files[fqn])
+            if !empty(ti)
+                let s:cache[fqn] = s:Sort(ti)
+            endif
+        endif
+        if (a:0 == 0 || !a:1)
+            return
+        endif
+    endfor
 
 
-                " The standard search order of a FQN is as follows:
-                " 1. a file-name toplevel type or static member type accessed by the file-name type declared in source files
-                " 2. other types declared in source files
-                " 3. an accessible loadable type.
-                " parameters:
-                "   fqns	- list of fqn
-                "   srcpaths	- a comma-separated list of directory names.
-                "   a:1		- search all.
-                " return	a dict of fqn -> type info
-                " precondition: 
-                " NOTE: call expand() to convert path to standard form
-                fu! s:DoGetTypeInfoForFQN(fqns, srcpath, ...)
-                    if empty(a:fqns) || empty(a:srcpath)
-                        return
+    " 3
+    let commalist = ''
+    for fqn in a:fqns
+        if has_key(s:cache, fqn) && (a:0 == 0 || !a:1)
+            return
+        else "if stridx(fqn, '.') >= 0
+            let commalist .= fqn . ','
+        endif
+    endfor
+    if !empty(commalist)
+        let res = s:RunReflection('-E', commalist, 'DoGetTypeInfoForFQN in Batch')
+        if res =~ "^{'"
+            let dict = eval(res)
+            for key in keys(dict)
+                if !has_key(s:cache, key)
+                    if type(dict[key]) == type({})
+                        let s:cache[key] = s:Sort(dict[key])
+                    elseif type(dict[key]) == type([])
+                        let s:cache[key] = sort(dict[key])
                     endif
+                endif
+            endfor
+        endif
+    endif
+endfu
 
-                    " 1
-                    let files = {}	" fqn -> java file path
-                    for fqn in a:fqns
-                        " toplevel type
-                        let filepath = globpath(a:srcpath, substitute(fqn, '\.', '/', 'g') . '.java')
-                        if filepath != ''
-                            let files[fqn] = expand(filepath)
+" a:1	filepath
+" a:2	package name
+fu! s:DoGetClassInfo(class, ...)
+    if has_key(s:cache, a:class)
+        return s:cache[a:class]
+    endif
 
-                            " nested type
-                        elseif stridx(fqn, '.') >= 0
-                            let idents = split(fqn, '\.')
-                            let i = len(idents)-2
-                            while i >= 0
-                                let filepath = globpath(a:srcpath, join(idents[:i], '/') . '.java')
-                                if filepath != ''
-                                    let files[fqn] = expand(filepath)
-                                    break
-                                endif
-                                let i -= 1
-                            endwhile
-                        endif
-                    endfor
+    " array type:	TypeName[] or '[I' or '[[Ljava.lang.String;'
+    if a:class[-1:] == ']' || a:class[0] == '['
+        return s:ARRAY_TYPE_INFO
+    endif
 
+    " either this or super is not qualified
+    if a:class == 'this' || a:class == 'super'
+        if &ft == 'jsp'
+            let ci = s:DoGetReflectionClassInfo('javax.servlet.jsp.HttpJspPage')
+            if a:class == 'this'
+                " TODO: search methods defined in <%! [declarations] %>
+                "	search methods defined in other jsp files included
+                "	avoid including self directly or indirectly
+            endif
+            return ci
+        endif
 
-                    " 2
-                    let dirs = {}		" dir.idents	-> names of nested type
-                    " dir.qfitems	-> items of quick fix
-                    " dir.fqn	-> fqn
-                    for fqn in a:fqns
-                        if !has_key(files, fqn)
-                            for path in split(a:srcpath, ',')
-                                let idents = split(fqn, '\.')
-                                let i = len(idents)-2
-                                while i >= 0
-                                    let dirpath = path . '/' . join(idents[:i], '/')
-                                    " it is a package
-                                    if isdirectory(dirpath)
-                                        let dirs[fnamemodify(dirpath, ':p:h:gs?[\\/]\+?/?')] = {'fqn': fqn, 'idents': idents[i+1:]}
-                                        break
-                                    endif
-                                    let i -= 1
-                                endwhile
-                            endfor
-                        endif
-                    endfor
+        call s:Info('A0. ' . a:class)
+        " this can be a local class or anonymous class as well as static type
+        let t = get(s:SearchTypeAt(javacomplete#parse(), java_parser#MakePos(line('.')-1, col('.')-1)), -1, {})
+        if !empty(t)
+            " What will be returned for super?
+            " - the protected or public inherited fields and methods. No ctors.
+            " - the (public static) fields of interfaces.
+            " - the methods of the Object class.
+            " What will be returned for this?
+            " - besides the above, all fields and methods of current class. No ctors.
+            return s:Sort(s:Tree2ClassInfo(t))
+            "return s:Sort(s:AddInheritedClassInfo(a:class == 'this' ? s:Tree2ClassInfo(t) : {}, t, 1))
+        endif
 
-                    if !empty(dirs)
-                        let items = {}	" dir -> items of quick fix
-
-                        let filepatterns = ''
-                        for dirpath in keys(dirs)
-                            let filepatterns .= escape(dirpath, ' \') . '/*.java '
-                        endfor
-
-                        let cwd = fnamemodify(expand('%:p:h'), ':p:h:gs?[\\/]\+?/?')
-                        exe 'vimgrep /\s*' . s:RE_TYPE_DECL . '/jg ' . filepatterns
-                        for item in getqflist()
-                            if item.text !~ '^\s*\*\s\+'
-                                let text = matchstr(s:Prune(item.text, -1), '\s*' . s:RE_TYPE_DECL)
-                                if text != ''
-                                    let subs = split(substitute(text, '\s*' . s:RE_TYPE_DECL, '\1;\2;\3', ''), ';', 1)
-                                    let dirpath = fnamemodify(bufname(item.bufnr), ':p:h:gs?[\\/]\+?/?')
-                                    let idents = dirs[dirpath].idents
-                                    if index(idents, subs[2]) >= 0 && (subs[0] =~ '\C\<public\>' || dirpath == cwd)	" FIXME?
-                                        let item.subs = subs
-                                        let dirs[dirpath].qfitems = get(dirs[dirpath], 'qfitems', []) + [item]
-                                    endif
-                                endif
-                            endif
-                        endfor
-
-                        for dirpath in keys(dirs)
-                            " a. names of nested type must be existed in the same file
-                            "	PackageName.NonFileNameTypeName.NestedType.NestedNestedType
-                            let qfitems = get(dirs[dirpath], 'qfitems', [])
-                            let nr = 0
-                            for ident in dirs[dirpath].idents
-                                for item in qfitems
-                                    if item.subs[2] == ident
-                                        let nr += 1
-                                    endif
-                                endfor
-                            endfor
-                            if nr == len(dirs[dirpath].idents)
-                                " b. TODO: Check whether one enclosed another is correct
-                                let files[fqn] = expand(bufname(qfitems[0].bufnr))
-                            endif
-                        endfor
-                    endif
+        return {}
+    endif
 
 
-                    call s:Info('FQN1&2: ' . string(keys(files)))
-                    for fqn in keys(files)
-                        if !has_key(s:cache, fqn) || get(get(s:files, files[fqn], {}), 'modifiedtime', 0) != getftime(files[fqn])
-                            let ti = s:GetClassInfoFromSource(fqn[strridx(fqn, '.')+1:], files[fqn])
-                            if !empty(ti)
-                                let s:cache[fqn] = s:Sort(ti)
-                            endif
-                        endif
-                        if (a:0 == 0 || !a:1)
-                            return
-                        endif
-                    endfor
+    if a:class !~ '^\s*' . s:RE_QUALID . '\s*$' || s:HasKeyword(a:class)
+        return {}
+    endif
 
 
-                    " 3
-                    let commalist = ''
-                    for fqn in a:fqns
-                        if has_key(s:cache, fqn) && (a:0 == 0 || !a:1)
-                            return
-                        else "if stridx(fqn, '.') >= 0
-                            let commalist .= fqn . ','
-                        endif
-                    endfor
-                    if !empty(commalist)
-                        let res = s:RunReflection('-E', commalist, 'DoGetTypeInfoForFQN in Batch')
-                        if res =~ "^{'"
-                            let dict = eval(res)
-                            for key in keys(dict)
-                                if !has_key(s:cache, key)
-                                    if type(dict[key]) == type({})
-                                        let s:cache[key] = s:Sort(dict[key])
-                                    elseif type(dict[key]) == type([])
-                                        let s:cache[key] = sort(dict[key])
-                                    endif
-                                endif
-                            endfor
-                        endif
-                    endif
-                endfu
+    let typename	= substitute(a:class, '\s', '', 'g')
+    let filekey	= a:0 > 0 ? a:1 : s:GetCurrentFileKey()
+    let packagename = a:0 > 1 ? a:2 : s:GetPackageName()
+    let srcpath	= join(s:GetSourceDirs(a:0 > 0 && a:1 != bufnr('%') ? a:1 : expand('%:p'), packagename), ',')
 
-                " a:1	filepath
-                " a:2	package name
-                fu! s:DoGetClassInfo(class, ...)
-                    if has_key(s:cache, a:class)
-                        return s:cache[a:class]
-                    endif
+    let names = split(typename, '\.')
+    " remove the package name if in the same packge
+    if len(names) > 1
+        if packagename == join(names[:-2], '.')
+            let names = names[-1:]
+        endif
+    endif
 
-                    " array type:	TypeName[] or '[I' or '[[Ljava.lang.String;'
-                    if a:class[-1:] == ']' || a:class[0] == '['
-                        return s:ARRAY_TYPE_INFO
-                    endif
-
-                    " either this or super is not qualified
-                    if a:class == 'this' || a:class == 'super'
-                        if &ft == 'jsp'
-                            let ci = s:DoGetReflectionClassInfo('javax.servlet.jsp.HttpJspPage')
-                            if a:class == 'this'
-                                " TODO: search methods defined in <%! [declarations] %>
-                                "	search methods defined in other jsp files included
-                                "	avoid including self directly or indirectly
-                            endif
-                            return ci
-                        endif
-
-                        call s:Info('A0. ' . a:class)
-                        " this can be a local class or anonymous class as well as static type
-                        let t = get(s:SearchTypeAt(javacomplete#parse(), java_parser#MakePos(line('.')-1, col('.')-1)), -1, {})
-                        if !empty(t)
-                            " What will be returned for super?
-                            " - the protected or public inherited fields and methods. No ctors.
-                            " - the (public static) fields of interfaces.
-                            " - the methods of the Object class.
-                            " What will be returned for this?
-                            " - besides the above, all fields and methods of current class. No ctors.
-                            return s:Sort(s:Tree2ClassInfo(t))
-                            "return s:Sort(s:AddInheritedClassInfo(a:class == 'this' ? s:Tree2ClassInfo(t) : {}, t, 1))
-                        endif
-
-                        return {}
-                    endif
+    " a FQN
+    if len(names) > 1
+        call s:DoGetTypeInfoForFQN([typename], srcpath)
+        let ci = get(s:cache, typename, {})
+        if get(ci, 'tag', '') == 'CLASSDEF'
+            return s:cache[typename]
+        elseif get(ci, 'tag', '') == 'PACKAGE'
+            return {}
+        endif
+    endif
 
 
-                    if a:class !~ '^\s*' . s:RE_QUALID . '\s*$' || s:HasKeyword(a:class)
-                        return {}
-                    endif
+    " The standard search order of a simple type name is as follows:
+    " 1. The current type including inherited types.
+    " 2. A nested type of the current type.
+    " 3. Explicitly named imported types (single type import).
+    " 4. Other types declared in the same package. Not only current directory.
+    " 5. Implicitly named imported types (import on demand).
 
+    " 1 & 2.
+    " NOTE: inherited types are treated as normal
+    if filekey == s:GetCurrentFileKey()
+        let simplename = typename[strridx(typename, '.')+1:]
+        if s:FoundClassDeclaration(simplename) != 0
+            call s:Info('A1&2')
+            let ci = s:GetClassInfoFromSource(simplename, '%')
+            " do not cache it
+            if !empty(ci)
+                return ci
+            endif
+        endif
+    else
+        let ci = s:GetClassInfoFromSource(typename, filekey)
+        if !empty(ci)
+            return ci
+        endif
+    endif
 
-                    let typename	= substitute(a:class, '\s', '', 'g')
-                    let filekey	= a:0 > 0 ? a:1 : s:GetCurrentFileKey()
-                    let packagename = a:0 > 1 ? a:2 : s:GetPackageName()
-                    let srcpath	= join(s:GetSourceDirs(a:0 > 0 && a:1 != bufnr('%') ? a:1 : expand('%:p'), packagename), ',')
+    " 3.
+    " NOTE: PackageName.Ident, TypeName.Ident
+    let fqn = s:SearchSingleTypeImport(typename, s:GetImports('imports_fqn', filekey))
+    if !empty(fqn)
+        call s:Info('A3')
+        call s:DoGetTypeInfoForFQN([fqn], srcpath)
+        let ti = get(s:cache, fqn, {})
+        if get(ti, 'tag', '') != 'CLASSDEF'
+            " TODO: mark the wrong import declaration.
+        endif
+        return ti
+    endif
 
-                    let names = split(typename, '\.')
-                    " remove the package name if in the same packge
-                    if len(names) > 1
-                        if packagename == join(names[:-2], '.')
-                            let names = names[-1:]
-                        endif
-                    endif
+    " 4 & 5
+    " NOTE: Keeps the fqn of the same package first!!
+    call s:Info('A4&5')
+    let fqns = [empty(packagename) ? typename : packagename . '.' . typename]
+    for p in s:GetImports('imports_star', filekey)
+        call add(fqns, p . typename)
+    endfor
+    call s:DoGetTypeInfoForFQN(fqns, srcpath)
+    for fqn in fqns
+        if has_key(s:cache, fqn)
+            return get(s:cache[fqn], 'tag', '') == 'CLASSDEF' ? s:cache[fqn] : {}
+        endif
+    endfor
 
-                    " a FQN
-                    if len(names) > 1
-                        call s:DoGetTypeInfoForFQN([typename], srcpath)
-                        let ci = get(s:cache, typename, {})
-                        if get(ci, 'tag', '') == 'CLASSDEF'
-                            return s:cache[typename]
-                        elseif get(ci, 'tag', '') == 'PACKAGE'
-                            return {}
-                        endif
-                    endif
-
-
-                    " The standard search order of a simple type name is as follows:
-                    " 1. The current type including inherited types.
-                    " 2. A nested type of the current type.
-                    " 3. Explicitly named imported types (single type import).
-                    " 4. Other types declared in the same package. Not only current directory.
-                    " 5. Implicitly named imported types (import on demand).
-
-                    " 1 & 2.
-                    " NOTE: inherited types are treated as normal
-                    if filekey == s:GetCurrentFileKey()
-                        let simplename = typename[strridx(typename, '.')+1:]
-                        if s:FoundClassDeclaration(simplename) != 0
-                            call s:Info('A1&2')
-                            let ci = s:GetClassInfoFromSource(simplename, '%')
-                            " do not cache it
-                            if !empty(ci)
-                                return ci
-                            endif
-                        endif
-                    else
-                        let ci = s:GetClassInfoFromSource(typename, filekey)
-                        if !empty(ci)
-                            return ci
-                        endif
-                    endif
-
-                    " 3.
-                    " NOTE: PackageName.Ident, TypeName.Ident
-                    let fqn = s:SearchSingleTypeImport(typename, s:GetImports('imports_fqn', filekey))
-                    if !empty(fqn)
-                        call s:Info('A3')
-                        call s:DoGetTypeInfoForFQN([fqn], srcpath)
-                        let ti = get(s:cache, fqn, {})
-                        if get(ti, 'tag', '') != 'CLASSDEF'
-                            " TODO: mark the wrong import declaration.
-                        endif
-                        return ti
-                    endif
-
-                    " 4 & 5
-                    " NOTE: Keeps the fqn of the same package first!!
-                    call s:Info('A4&5')
-                    let fqns = [empty(packagename) ? typename : packagename . '.' . typename]
-                    for p in s:GetImports('imports_star', filekey)
-                        call add(fqns, p . typename)
-                    endfor
-                    call s:DoGetTypeInfoForFQN(fqns, srcpath)
-                    for fqn in fqns
-                        if has_key(s:cache, fqn)
-                            return get(s:cache[fqn], 'tag', '') == 'CLASSDEF' ? s:cache[fqn] : {}
-                        endif
-                    endfor
-
-                    return {}
-                endfu
+    return {}
+endfu
 
                 " Rules of overriding and hiding:
                 " 1. Fields cannot be overridden; they can only be hidden.
