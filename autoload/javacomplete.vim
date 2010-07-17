@@ -2,8 +2,10 @@
 " Version:	0.77.1
 " Language:	Java
 " Maintainer:	cheng fang <fangread@yahoo.com.cn>
+" Submaitainer: Victor Denisov <denisovenator@gmail.com>
 " Last Change:	2007-09-26
 " Copyright:	Copyright (C) 2006-2007 cheng fang. All rights reserved.
+" Copyright:	Copyright (C) 2010 Victor Denisov. All rights reserved.
 " License:	Vim License	(see vim's :help license)
 
 " constants							{{{1
@@ -95,7 +97,6 @@ let s:RE_KEYWORDS	= '\<\%(' . join(s:KEYWORDS, '\|') . '\)\>'
 
 " local variables						{{{1
 let b:context_type = s:CONTEXT_OTHER
-"let b:statement = ''			" statement before cursor
 let b:dotexpr = ''			" expression ends with '.'
 let b:incomplete = ''			" incomplete word: 1. dotexpr.method(|) 2. new classname(|) 3. dotexpr.ab|, 4. ja|, 5. method(|
 let b:errormsg = ''
@@ -2077,9 +2078,11 @@ endif
 
 " Log utilities								{{{1
 fu! s:WatchVariant(variant)
-    redir >> log.txt
-    echo a:variant
-    redir END
+    if 0 == javacomplete#GetLogLevel()
+        redir >> log.txt
+        echo a:variant
+        redir END
+    endif
 endfu
 
 " level
