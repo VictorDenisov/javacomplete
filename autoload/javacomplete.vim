@@ -1,5 +1,5 @@
 " Vim completion script	- hit 80% complete tasks
-" Version:	0.77.1
+" Version:	0.77.2
 " Language:	Java
 " Maintainer:	cheng fang <fangread@yahoo.com.cn>
 " Submaitainer: Victor Denisov <denisovenator@gmail.com>
