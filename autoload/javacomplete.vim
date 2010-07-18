@@ -1002,7 +1002,6 @@ function! s:UpdateImportsCache(filekey)
         endif
     endfor
     let s:files[a:filekey] = props
-
 endfunction
 
 fu! s:GetImports(kind, ...)
@@ -2831,4 +2830,4 @@ fu! s:DoGetPackageInfoInDirs(package, onlyPackages, ...)
 endfu
 " }}}
 "}}}
-" vim:set fdm=marker sw=4 ts=4 si foldcolumn:1 expandtab nowrap:
+" vim:set fdm=marker sw=4 ts=4 si expandtab nowrap:
