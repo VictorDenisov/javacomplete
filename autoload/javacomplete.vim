@@ -2099,14 +2099,6 @@ fu! s:Log(level, key, ...)
     endif
 endfu
 
-fu! s:System(cmd, caller)
-    call s:WatchVariant(a:cmd)
-    let t = reltime()
-    let res = system(a:cmd)
-    call s:Debug(reltimestr(reltime(t)) . 's to exec "' . a:cmd . '" by ' . a:caller)
-    return res
-endfu
-
 " functions to get information						{{{1
 " utilities								{{{2
 fu! s:MemberCompare(m1, m2)
@@ -2134,6 +2126,15 @@ fu! s:RunReflection(option, args, log)
     let cmd = javacomplete#GetJVMLauncher() . classpath . ' Reflection ' . a:option . ' "' . a:args . '"'
     return s:System(cmd, a:log)
 endfu
+
+fu! s:System(cmd, caller)
+    call s:WatchVariant(a:cmd)
+    let t = reltime()
+    let res = system(a:cmd)
+    call s:Debug(reltimestr(reltime(t)) . 's to exec "' . a:cmd . '" by ' . a:caller)
+    return res
+endfu
+
 " class information							{{{2
 
 
