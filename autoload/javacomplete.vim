@@ -296,7 +296,7 @@ endfunction
 fu! s:CompleteAfterWord(incomplete)
     " packages in jar files
     if !exists('s:all_packages_in_jars_loaded')
-        call s:DoGetInfoByReflection('-', '-P')
+        call s:DoGetPackageInfoByReflection('-', '-P')
         let s:all_packages_in_jars_loaded = 1
     endif
 
@@ -2312,7 +2312,6 @@ fu! s:DoGetClassInfo(class, ...)
             " What will be returned for this?
             " - besides the above, all fields and methods of current class. No ctors.
             return s:Sort(s:Tree2ClassInfo(t))
-            "return s:Sort(s:AddInheritedClassInfo(a:class == 'this' ? s:Tree2ClassInfo(t) : {}, t, 1))
         endif
 
         return {}
@@ -2561,12 +2560,12 @@ endfu
 
 " package information							{{{2
 
-fu! s:DoGetInfoByReflection(class, option)
+fu! s:DoGetPackageInfoByReflection(class, option)
     if has_key(s:cache, a:class)
         return s:cache[a:class]
     endif
 
-    let res = s:RunReflection(a:option, a:class, 's:DoGetInfoByReflection')
+    let res = s:RunReflection(a:option, a:class, 's:DoGetPackageInfoByReflection')
     if res =~ '^[{\[]'
         let v = eval(res)
         if type(v) == type([])
@@ -2761,7 +2760,7 @@ fu! s:GetMembers(fqn, ...)
     let list = []
     let isClass = 0
 
-    let v = s:DoGetInfoByReflection(a:fqn, '-E')
+    let v = s:DoGetPackageInfoByReflection(a:fqn, '-E')
     if type(v) == type([])
         let list = v
     elseif type(v) == type({}) && v != {}
