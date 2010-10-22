@@ -225,14 +225,11 @@ function! javacomplete#Complete(findstart, base)
         return s:FindStart()
     endif
 
-
     " Return list of matches.
-
     call s:Trace('b:context_type: "' . b:context_type . '"  b:incomplete: "' . b:incomplete . '"  b:dotexpr: "' . b:dotexpr . '"')
     if b:dotexpr =~ '^\s*$' && b:incomplete =~ '^\s*$'
         return []
     endif
-
 
     let result = []
     if b:dotexpr !~ '^\s*$'
@@ -262,7 +259,6 @@ function! javacomplete#Complete(findstart, base)
         " then no filter needed
         let b:incomplete = ''
     endif
-
 
     if len(result) > 0
         " filter according to b:incomplete
@@ -315,7 +311,6 @@ fu! s:CompleteAfterWord(incomplete)
     endfor
 
     let pkgs += s:DoGetPackageInfoInDirs(a:incomplete, b:context_type == s:CONTEXT_PACKAGE_DECL, 1)
-
 
     " add accessible types which name beginning with the incomplete in source files
     " TODO: remove the inaccessible
@@ -1077,7 +1072,6 @@ fu! s:SearchStaticImports(name, fullmatch)
     return result
 endfu
 
-
 " search decl							{{{1
 " Return: The declaration of identifier under the cursor
 " Note: The type of a variable must be imported or a fqn.
@@ -1235,76 +1229,76 @@ function! s:GetThisClassDeclaration()
     return list
 endfunction
 
-    " searches for name of a var or a field and determines the meaning  {{{1
+" searches for name of a var or a field and determines the meaning  {{{1
 
-    " The standard search order of a variable or field is as follows:
-    " 1. Local variables declared in the code block, for loop, or catch clause
-    "    from current scope up to the most outer block, a method or an initialization block
-    " 2. Parameters if the code is in a method or ctor
-    " 3. Fields of the type
-    " 4. Accessible inherited fields.
-    " 5. If the type is a nested type,
-    "    local variables of the enclosing block or fields of the enclosing class.
-    "    Note that if the type is a static nested type, only static members of an enclosing block or class are searched
-    "    Reapply this rule to the upper block and class enclosing the enclosing type recursively
-    " 6. Accessible static fields imported.
-    "    It is allowed that several fields with the same name.
+" The standard search order of a variable or field is as follows:
+" 1. Local variables declared in the code block, for loop, or catch clause
+"    from current scope up to the most outer block, a method or an initialization block
+" 2. Parameters if the code is in a method or ctor
+" 3. Fields of the type
+" 4. Accessible inherited fields.
+" 5. If the type is a nested type,
+"    local variables of the enclosing block or fields of the enclosing class.
+"    Note that if the type is a static nested type, only static members of an enclosing block or class are searched
+"    Reapply this rule to the upper block and class enclosing the enclosing type recursively
+" 6. Accessible static fields imported.
+"    It is allowed that several fields with the same name.
 
-    " The standard search order of a method is as follows:
-    " 1. Methods of the type
-    " 2. Accessible inherited methods.
-    " 3. Methods of the enclosing class if the type is a nested type.
-    " 4. Accessible static methods imported.
-    "    It is allowed that several methods with the same name and signature.
+" The standard search order of a method is as follows:
+" 1. Methods of the type
+" 2. Accessible inherited methods.
+" 3. Methods of the enclosing class if the type is a nested type.
+" 4. Accessible static methods imported.
+"    It is allowed that several methods with the same name and signature.
 
-    " first		return at once if found one.
-    " fullmatch	1 - equal, 0 - match beginning
-    " return [types, methods, fields, vars]
-    fu! s:SearchForName(name, first, fullmatch)
-        let result = [[], [], [], []]
-        if s:IsKeyword(a:name)
-            return result
-        endif
-
-        " use java_parser.vim
-        if javacomplete#GetSearchdeclMethod() == 4
-            " declared in current file
-            let unit = javacomplete#parse()
-            let targetPos = java_parser#MakePos(line('.')-1, col('.')-1)
-            let trees = s:SearchNameInAST(unit, a:name, targetPos, a:fullmatch)
-            for tree in trees
-                if tree.tag == 'VARDEF'
-                    call add(result[2], tree)
-                elseif tree.tag == 'METHODDEF'
-                    call add(result[1], tree)
-                elseif tree.tag == 'CLASSDEF'
-                    call add(result[0], tree.name)
-                endif
-            endfor
-
-            if a:first && result != [[], [], [], []]	| return result | endif
-
-            " Accessible inherited members
-            let type = get(s:SearchTypeAt(unit, targetPos), -1, {})
-            if !empty(type)
-                let members = s:SearchMember(type, a:name, a:fullmatch, 2, 1, 0, 1)
-                let result[0] += members[0]
-                let result[1] += members[1]
-                let result[2] += members[2]
-            endif
-
-            " static import
-            let si = s:SearchStaticImports(a:name, a:fullmatch)
-            let result[1] += si[1]
-            let result[2] += si[2]
-        endif
+" first		return at once if found one.
+" fullmatch	1 - equal, 0 - match beginning
+" return [types, methods, fields, vars]
+fu! s:SearchForName(name, first, fullmatch)
+    let result = [[], [], [], []]
+    if s:IsKeyword(a:name)
         return result
-    endfu
+    endif
 
-    " TODO: how to determine overloaded functions
-    fu! s:DetermineMethod(methods, parameters)
-        return get(a:methods, 0, {})
-    endfu
+    " use java_parser.vim
+    if javacomplete#GetSearchdeclMethod() == 4
+        " declared in current file
+        let unit = javacomplete#parse()
+        let targetPos = java_parser#MakePos(line('.')-1, col('.')-1)
+        let trees = s:SearchNameInAST(unit, a:name, targetPos, a:fullmatch)
+        for tree in trees
+            if tree.tag == 'VARDEF'
+                call add(result[2], tree)
+            elseif tree.tag == 'METHODDEF'
+                call add(result[1], tree)
+            elseif tree.tag == 'CLASSDEF'
+                call add(result[0], tree.name)
+            endif
+        endfor
+
+        if a:first && result != [[], [], [], []]	| return result | endif
+
+        " Accessible inherited members
+        let type = get(s:SearchTypeAt(unit, targetPos), -1, {})
+        if !empty(type)
+            let members = s:SearchMember(type, a:name, a:fullmatch, 2, 1, 0, 1)
+            let result[0] += members[0]
+            let result[1] += members[1]
+            let result[2] += members[2]
+        endif
+
+        " static import
+        let si = s:SearchStaticImports(a:name, a:fullmatch)
+        let result[1] += si[1]
+        let result[2] += si[2]
+    endif
+    return result
+endfu
+
+" TODO: how to determine overloaded functions
+fu! s:DetermineMethod(methods, parameters)
+    return get(a:methods, 0, {})
+endfu
 
 " Parser.GetType() in insenvim
 function! s:GetDeclaredClassName(var)
@@ -1545,8 +1539,7 @@ fu! javacomplete#Searchdecl()
 endfu
 
 
-" java							{{{1
-
+" java							{{{1 
 fu! s:IsBuiltinType(name)
     return index(s:PRIMITIVE_TYPES, a:name) >= 0
 endfu
