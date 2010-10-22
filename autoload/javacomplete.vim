@@ -119,7 +119,7 @@ function! s:FindStart()
     let b:context_type = s:CONTEXT_OTHER
 
     let statement = s:GetStatement()
-    call s:WatchVariant('statement: "' . statement . '"')
+    call s:Trace('statement: "' . statement . '"')
 
     if statement =~ '[.0-9A-Za-z_]\s*$'
         let valid = 1
@@ -228,7 +228,7 @@ function! javacomplete#Complete(findstart, base)
 
     " Return list of matches.
 
-    call s:WatchVariant('b:context_type: "' . b:context_type . '"  b:incomplete: "' . b:incomplete . '"  b:dotexpr: "' . b:dotexpr . '"')
+    call s:Trace('b:context_type: "' . b:context_type . '"  b:incomplete: "' . b:incomplete . '"  b:dotexpr: "' . b:dotexpr . '"')
     if b:dotexpr =~ '^\s*$' && b:incomplete =~ '^\s*$'
         return []
     endif
@@ -2053,14 +2053,6 @@ endif
 
 
 " Log utilities								{{{1
-fu! s:WatchVariant(variant)
-    if 0 == javacomplete#GetLogLevel()
-        redir >> log.txt
-        echo a:variant
-        redir END
-    endif
-endfu
-
 " level
 " 	5	off/fatal 
 " 	4	error 
@@ -2128,7 +2120,7 @@ fu! s:RunReflection(option, args, log)
 endfu
 
 fu! s:System(cmd, caller)
-    call s:WatchVariant(a:cmd)
+    call s:Trace(a:cmd)
     let t = reltime()
     let res = system(a:cmd)
     call s:Debug(reltimestr(reltime(t)) . 's to exec "' . a:cmd . '" by ' . a:caller)
