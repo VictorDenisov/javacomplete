@@ -937,6 +937,7 @@ function! s:ParseImportsDeclarations()
 
     let lnum_old = line('.')
     let col_old = col('.')
+    let window_position = winsaveview()
     call cursor(1, 1)
 
     if &ft == 'jsp'
@@ -971,6 +972,7 @@ function! s:ParseImportsDeclarations()
     endif
 
     call cursor(lnum_old, col_old)
+    call winrestview(window_position)
     return imports
 endfunction
 
